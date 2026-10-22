@@ -7,18 +7,34 @@ from html import escape
 from xml.etree import ElementTree as ET
 
 from ..topology import Topology
-from .layout import Layout, compute_layout
-from .style import NEW_STROKE, box_lines, colors
+from . import icons
+from .layout import Box, Layout, compute_layout
+from .style import (FRAME_FILL, FRAME_STROKE, FRAME_TEXT, ICON_GAP, ICON_LEFT, NEW_STROKE,
+                    box_lines, colors, icon_color, icon_size)
 
 
-def _vertex_style(fill: str, stroke: str, dashed: bool, new: bool) -> str:
-    parts = ["rounded=1", "whiteSpace=wrap", "html=1", "arcSize=12", "align=center",
+def _vertex_style(box: Box, new: bool) -> str:
+    # draw.io's "label" shape is a box with an image on the left, which is exactly this.
+    fill, stroke = colors(box.node)
+    size = icon_size(box.leaf)
+    parts = ["shape=label", "rounded=1", "whiteSpace=wrap", "html=1", "arcSize=12", "align=left",
              "verticalAlign=middle", "fontSize=11", f"fillColor={fill}",
-             f"strokeColor={NEW_STROKE if new else stroke}",
-             f"strokeWidth={3 if new else 1.5}"]
-    if dashed:
+             f"strokeColor={NEW_STROKE if new else stroke}", f"strokeWidth={3 if new else 1.5}",
+             f"image={icons.drawio_image(box.node.kind, icon_color(box.node))}",
+             f"imageWidth={size}", f"imageHeight={size}", "imageAlign=left",
+             "imageVerticalAlign=middle", f"spacingLeft={ICON_LEFT + size + ICON_GAP - 4}",
+             "spacing=4"]
+    if box.node.inferred:
         parts.append("dashed=1")
     return ";".join(parts) + ";"
+
+
+def _frame_style() -> str:
+    # A container, so moving the frame in draw.io moves the devices in it.
+    return ";".join(["rounded=1", "arcSize=4", "html=1", "container=1", "collapsible=0",
+                     f"fillColor={FRAME_FILL}", f"strokeColor={FRAME_STROKE}", "dashed=1",
+                     "strokeWidth=1.5", "verticalAlign=top", "align=left", "spacingLeft=12",
+                     "spacingTop=4", "fontStyle=1", "fontSize=14", f"fontColor={FRAME_TEXT}"]) + ";"
 
 
 def to_drawio(topo: Topology, layout: Layout | None = None,
@@ -36,6 +52,14 @@ def to_drawio(topo: Topology, layout: Layout | None = None,
     ET.SubElement(root, "mxCell", id="0")
     ET.SubElement(root, "mxCell", id="1", parent="0")
 
+    frames = {}
+    for k, f in enumerate(layout.frames):
+        frames[f.name] = (f"g{k}", f)
+        cell = ET.SubElement(root, "mxCell", id=f"g{k}", value=escape(f.name), vertex="1",
+                             parent="1", style=_frame_style())
+        ET.SubElement(cell, "mxGeometry", x=f"{f.x:.0f}", y=f"{f.y:.0f}", width=f"{f.w:.0f}",
+                      height=f"{f.h:.0f}", **{"as": "geometry"})
+
     cell_ids: dict[str, str] = {}
     for i, (node_id, box) in enumerate(layout.boxes.items(), start=2):
         cid = f"n{i}"
@@ -43,11 +67,13 @@ def to_drawio(topo: Topology, layout: Layout | None = None,
         lines = box_lines(box.node, box.leaf, box.parent_port if box.leaf else None)
         value = f"<b>{escape(lines[0])}</b>" + "".join(
             f"<br><font style=\"font-size:10px\">{escape(x)}</font>" for x in lines[1:])
-        fill, stroke = colors(box.node)
-        cell = ET.SubElement(root, "mxCell", id=cid, value=value, vertex="1", parent="1",
-                             style=_vertex_style(fill, stroke, box.node.inferred,
-                                                 node_id in new_ids))
-        ET.SubElement(cell, "mxGeometry", x=f"{box.x:.0f}", y=f"{box.y:.0f}",
+        parent, (x, y) = "1", (box.x, box.y)
+        if box.group in frames:  # inside a frame, positions are relative to it
+            parent, f = frames[box.group]
+            x, y = box.x - f.x, box.y - f.y
+        cell = ET.SubElement(root, "mxCell", id=cid, value=value, vertex="1", parent=parent,
+                             style=_vertex_style(box, node_id in new_ids))
+        ET.SubElement(cell, "mxGeometry", x=f"{x:.0f}", y=f"{y:.0f}",
                       width=f"{box.w:.0f}", height=f"{box.h:.0f}", **{"as": "geometry"})
 
     for j, edge in enumerate(layout.edges):
@@ -59,10 +85,12 @@ def to_drawio(topo: Topology, layout: Layout | None = None,
         value = ""
         src, dst = cell_ids[edge.parent], cell_ids[edge.child]
         if edge.tree:
-            leaf = layout.boxes[edge.child].leaf
-            style += ["exitX=0.5", "exitY=1", "exitDx=0", "exitDy=0"]
-            style += ["entryX=0", "entryY=0.5"] if leaf else ["entryX=0.5", "entryY=0"]
-            if not leaf:
+            parent, child = layout.boxes[edge.parent], layout.boxes[edge.child]
+            (sx, sy), (ex, ey) = edge.points[0], edge.points[-1]
+            style += [f"exitX={(sx - parent.x) / parent.w:g}",
+                      f"exitY={(sy - parent.y) / parent.h:g}", "exitDx=0", "exitDy=0", f"entryX={(ex - child.x) / child.w:g}",
+                      f"entryY={(ey - child.y) / child.h:g}"]
+            if not child.leaf:
                 value = " ↔ ".join(p for p in (edge.parent_port, edge.child_port) if p)
         else:
             style.append("strokeColor=#9333ea")

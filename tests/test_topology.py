@@ -164,3 +164,39 @@ def test_tree_starts_at_queried_switch_when_there_is_no_router():
     tree = render_tree(build_topology(DiscoveryRun(started_at="t", devices=[dev], hosts=hosts)))
     # The inferred unmanaged switch has more links, but the real switch comes first.
     assert tree.startswith("core-sw (switch")
+
+
+VM_A, VM_B, VM_C = "00:50:56:aa:00:01", "00:15:5d:aa:00:02", "52:54:00:aa:00:03"
+SERVER = "3c:52:82:00:00:50"
+
+
+def one_port_run(*macs) -> DiscoveryRun:
+    sw = SnmpDevice(ip="10.0.0.2", sys_name="sw", chassis_id=C_MAC, fdb=fdb("7", *macs))
+    return DiscoveryRun(started_at="t", devices=[sw], hosts=[Host(None, m, ["fdb"]) for m in macs])
+
+
+def test_vms_behind_a_physical_server_make_it_a_vm_host():
+    topo = build_topology(one_port_run(SERVER, VM_A, VM_B))
+    kinds = {n.mac: n.kind for n in topo.nodes}
+    assert kinds[SERVER] == "vm-host"
+    assert not any(n.kind == "unmanaged-switch" for n in topo.nodes)
+    assert edges(topo) == {tuple(sorted(e)) for e in [("sw", SERVER), (SERVER, VM_A), (SERVER, VM_B)]}
+    link = next(lk for lk in topo.links if topo.node(lk.target).mac == SERVER)
+    assert link.source_port == "7" and not link.inferred
+
+
+def test_all_virtual_macs_infer_a_vm_host():
+    topo = build_topology(one_port_run(VM_A, VM_B, VM_C))
+    vm_host = next(n for n in topo.nodes if n.kind == "vm-host")
+    assert vm_host.inferred and vm_host.label == "VM host (sw 7)"
+    assert edges(topo) == {("VM host (sw 7)", "sw")} | {
+        tuple(sorted(("VM host (sw 7)", m))) for m in (VM_A, VM_B, VM_C)}
+    vendors = {n.mac: n.vendor for n in topo.nodes if n.mac}
+    assert vendors[VM_A] == "VMware virtual NIC"
+    assert vendors[VM_C] == "QEMU/KVM virtual NIC"
+
+
+def test_two_physical_macs_still_mean_an_unmanaged_switch():
+    topo = build_topology(one_port_run(SERVER, H1, VM_A))
+    assert any(n.kind == "unmanaged-switch" for n in topo.nodes)
+    assert not any(n.kind == "vm-host" for n in topo.nodes)

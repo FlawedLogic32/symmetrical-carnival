@@ -53,6 +53,13 @@ probe_discovered_hosts = false
 resolve_names = false
 oui_file = "oui.csv"
 
+[diagram]
+# Draw a frame round each site, floor or room. See config.example.toml.
+group_by_snmp_location = false
+# [[diagram.groups]]
+# name = "First floor"
+# members = ["floor1-sw*", "192.168.20.0/24"]
+
 [output]
 directory = "runs"
 """

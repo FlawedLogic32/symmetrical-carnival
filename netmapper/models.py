@@ -64,6 +64,7 @@ class SnmpDevice:
     sys_name: str | None = None
     sys_descr: str | None = None
     sys_object_id: str | None = None
+    sys_location: str | None = None  # free text set by the admin, e.g. "Floor 2 comms room"
     chassis_id: str | None = None
     interfaces: list[Interface] = field(default_factory=list)
     neighbors: list[Neighbor] = field(default_factory=list)
