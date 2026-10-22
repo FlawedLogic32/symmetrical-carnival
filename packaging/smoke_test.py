@@ -2,7 +2,8 @@
 
     python packaging/smoke_test.py dist/netmapper.exe
 
-Checks: --version, init, an ARP-only run on this machine, double-click mode, and (if
+Checks: --version, init, an ARP-only run on this machine, a scheduled-style run, creating
+and removing a Task Scheduler task (on Windows), double-click mode, and (if
 snmpsim is installed) a full run against a simulated switch over real SNMP.
 """
 
@@ -73,6 +74,19 @@ def main(exe: Path) -> None:
     for name in ("latest.json", "topology-latest.json", "network-latest.html",
                  "network-latest.drawio"):
         expect(work / "runs" / name)
+
+    # A scheduled-style run logs to a file instead of the console.
+    run(exe, "discover", "--scheduled", "--no-alerts", cwd=work)
+    expect(work / "runs" / "netmapper.log", "scheduled run")
+    if os.name == "nt":
+        # Check Task Scheduler accepts the task definition, then clean up.
+        name = "netmapper-smoke-test"
+        try:
+            run(exe, "schedule", "--name", name, "--at", "23:59", "--every-hours", "1",
+                "--weekdays", cwd=work)
+            print(run(exe, "schedule", "--name", name, "--status", cwd=work).stdout)
+        finally:
+            run(exe, "schedule", "--name", name, "--remove", cwd=work, check=False)
 
     double = Path(tempfile.mkdtemp(prefix="netmapper-dbl-"))
     run(exe, cwd=double)  # no arguments, as if double-clicked

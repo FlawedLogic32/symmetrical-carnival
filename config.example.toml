@@ -55,3 +55,27 @@ oui_file = "oui.csv"
 # Each run saves discovery-, topology- and network-<time> files (JSON, .html, .drawio),
 # plus *-latest copies of the newest. Relative paths are relative to this file.
 directory = "runs"
+
+[alerts]
+# After each run, tell someone if devices appeared ("new"), disappeared ("gone") or
+# moved to a different switch port ("moved"). The first run never alerts.
+on = ["new"]
+# A Windows notification on this PC. Needs someone logged on, so it doesn't work
+# with "netmapper schedule --background".
+desktop = true
+
+# Email through your mail server. Off unless smtp_host is set.
+# [alerts.email]
+# smtp_host = "smtp.office365.com"
+# smtp_port = 587
+# security = "starttls"        # starttls, ssl or none
+# username = "alerts@example.com"
+# password = "env:NETMAPPER_SMTP_PASSWORD"
+# from = "alerts@example.com"
+# to = ["it@example.com"]
+
+# POST to a webhook: Teams (a Workflows webhook), Slack, Discord, or plain JSON for
+# anything else. Off unless url is set. The URL is a secret, so env: works here too.
+# [alerts.webhook]
+# url = "env:NETMAPPER_WEBHOOK"
+# format = "teams"             # json, teams, slack or discord

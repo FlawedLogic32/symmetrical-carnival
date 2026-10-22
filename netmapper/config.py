@@ -31,6 +31,35 @@ class SnmpCredential:
 
 
 @dataclass
+class EmailAlert:
+    smtp_host: str
+    to: list[str]
+    sender: str
+    smtp_port: int = 587
+    security: str = "starttls"  # "starttls", "ssl" or "none"
+    username: str | None = None
+    password: str | None = None
+
+
+@dataclass
+class WebhookAlert:
+    url: str
+    format: str = "json"  # "json", "teams", "slack" or "discord"
+
+
+@dataclass
+class AlertsConfig:
+    on: set[str] = field(default_factory=lambda: {"new"})  # any of "new", "gone", "moved"
+    desktop: bool = True
+    email: EmailAlert | None = None
+    webhook: WebhookAlert | None = None
+
+
+ALERT_EVENTS = {"new", "gone", "moved"}
+WEBHOOK_FORMATS = {"json", "teams", "slack", "discord"}
+
+
+@dataclass
 class Config:
     subnets: list[ipaddress.IPv4Network] = field(default_factory=list)
     ping_sweep: bool = False
@@ -48,6 +77,7 @@ class Config:
     output_directory: Path = Path("runs")
     resolve_names: bool = False
     oui_file: Path = Path("oui.csv")
+    alerts: AlertsConfig = field(default_factory=AlertsConfig)
 
 
 def _secret(value: str | None) -> str | None:
@@ -81,6 +111,46 @@ def _credential(raw: dict) -> SnmpCredential:
     return cred
 
 
+def _alerts(raw: dict) -> AlertsConfig:
+    on = {str(e).lower() for e in raw.get("on", ["new"])}
+    if on - ALERT_EVENTS:
+        raise ConfigError(f"alerts.on: unknown events {sorted(on - ALERT_EVENTS)}; "
+                          f"use {sorted(ALERT_EVENTS)}")
+    alerts = AlertsConfig(on=on, desktop=bool(raw.get("desktop", True)))
+
+    email = raw.get("email", {})
+    if email.get("enabled", True) and email.get("smtp_host"):
+        to = email.get("to", [])
+        to = [to] if isinstance(to, str) else [str(t) for t in to]
+        if not to:
+            raise ConfigError("alerts.email needs at least one 'to' address")
+        security = str(email.get("security", "starttls")).lower()
+        if security not in {"starttls", "ssl", "none"}:
+            raise ConfigError("alerts.email.security must be starttls, ssl or none")
+        default_port = {"starttls": 587, "ssl": 465, "none": 25}[security]
+        username = _secret(email.get("username"))
+        alerts.email = EmailAlert(
+            smtp_host=str(email["smtp_host"]),
+            smtp_port=int(email.get("smtp_port", default_port)),
+            security=security,
+            username=username,
+            password=_secret(email.get("password")),
+            sender=str(email.get("from") or username or f"netmapper@{email['smtp_host']}"),
+            to=to,
+        )
+
+    hook = raw.get("webhook", {})
+    if hook.get("enabled", True) and hook.get("url"):
+        fmt = str(hook.get("format", "json")).lower()
+        if fmt not in WEBHOOK_FORMATS:
+            raise ConfigError(f"alerts.webhook.format must be one of {sorted(WEBHOOK_FORMATS)}")
+        url = _secret(str(hook["url"]))
+        if not url.lower().startswith(("https://", "http://")):
+            raise ConfigError("alerts.webhook.url must start with https://")
+        alerts.webhook = WebhookAlert(url=url, format=fmt)
+    return alerts
+
+
 def load_config(path: str | Path) -> Config:
     path = Path(path)
     try:
@@ -97,6 +167,7 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
     snmp = raw.get("snmp", {})
     out = raw.get("output", {})
     topo = raw.get("topology", {})
+    alerts = raw.get("alerts", {})
 
     try:
         subnets = [ipaddress.IPv4Network(s, strict=False) for s in disc.get("subnets", [])]
@@ -127,4 +198,5 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
         output_directory=output_dir,
         resolve_names=bool(topo.get("resolve_names", False)),
         oui_file=oui_file,
+        alerts=_alerts(alerts),
     )
