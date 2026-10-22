@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netmapper"
-version = "0.2.0"
+version = "1.0.0"
 description = "Quiet, re-runnable network discovery that feeds an automatic network diagram"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
@@ -14,6 +14,7 @@ dependencies = ["pysnmp>=7.1,<8", "cryptography>=42"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+build = ["pyinstaller>=6"]
 
 [project.scripts]
 netmapper = "netmapper.cli:main"
@@ -23,3 +24,4 @@ include = ["netmapper*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning:pysnmp.*"]

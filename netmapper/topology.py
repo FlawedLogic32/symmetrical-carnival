@@ -324,8 +324,9 @@ class _Builder:
             for h in unplaced:
                 self.add_link(seg, None, h, None, "inferred", inferred=True)
             if self.run.devices:
-                self.notes.append(f"{len(unplaced)} hosts were not in any switch MAC table, "
-                                  "so their switch port is unknown")
+                count = len(unplaced)
+                self.notes.append(f"{count} host{'s were' if count != 1 else ' was'} not in any "
+                                  "switch MAC table, so the switch port is unknown")
             else:
                 self.notes.append("no managed switches were queried, so connections "
                                   "between devices are unknown")
@@ -381,6 +382,12 @@ def build_topology(run: DiscoveryRun, vendors: VendorLookup | None = None,
                     notes=b.notes)
 
 
+def root_priority(node: Node, degree: int) -> tuple:
+    """Sort key for where to start drawing: a router, then queried switches, then the rest."""
+    return (node.kind != ROUTER, not node.managed, node.kind == HOST,
+            node.kind == UNKNOWN_SEGMENT, -degree, node.label.lower())
+
+
 def render_tree(topo: Topology) -> str:
     """A plain-text outline of the topology, starting from the router (or busiest device)."""
     adj: dict[str, list[tuple[str, Link]]] = defaultdict(list)
@@ -409,7 +416,9 @@ def render_tree(topo: Topology) -> str:
             else:
                 parent_port, child_port = via.target_port, via.source_port
             port = f"[{parent_port}] " if parent_port else ""
-            remote = f" port {child_port}" if child_port else ""
+            if child_port and not child_port.lower().startswith("port"):
+                child_port = f"port {child_port}"
+            remote = f" {child_port}" if child_port else ""
             guess = " ~" if via.inferred else ""
             lines.append(f"{prefix}{port}->{guess} {describe(node)}{remote}")
         children = sorted(adj[node_id], key=lambda c: (by_id[c[0]].kind == HOST,
@@ -418,8 +427,7 @@ def render_tree(topo: Topology) -> str:
             if child not in seen:
                 walk(child, depth + 1, link)
 
-    roots = sorted(topo.nodes, key=lambda n: (n.kind != ROUTER, n.kind == HOST,
-                                              -len(adj[n.id])))
+    roots = sorted(topo.nodes, key=lambda n: root_priority(n, len(adj[n.id])))
     for root in roots:
         if root.id not in seen:
             walk(root.id, 0, None)

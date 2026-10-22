@@ -27,7 +27,8 @@ def _default_factory(cfg: Config) -> ClientFactory:
     from .collectors.snmp_client import PySnmpClient
 
     def make(ip, cred):
-        return PySnmpClient(ip, cred, timeout=cfg.snmp_timeout_seconds, retries=cfg.snmp_retries)
+        return PySnmpClient(ip, cred, timeout=cfg.snmp_timeout_seconds, retries=cfg.snmp_retries,
+                            port=cfg.snmp_port)
 
     return make
 

@@ -1,28 +1,58 @@
 # netmapper
 
 A re-runnable tool that discovers what is on a small or medium business network,
-including how devices connect through managed and unmanaged switches, and turns it
-into a network diagram.
+including how devices connect through managed and unmanaged switches, and draws it
+as a network diagram.
 
 It is built to be **quiet**. It asks the network what it already knows instead of
 scanning it, so it shouldn't set off intrusion detection or security monitoring.
 
-> Status: steps 1 and 2 of 4 (discovery and topology) are done. Diagram export and
-> Windows packaging come next. For now the output is JSON plus a text outline.
+Each run produces:
+
+- **`network-latest.html`**: the diagram, a list of what changed since the last run, and a
+  searchable table of every device. It's a single self-contained file that works offline.
+- **`network-latest.drawio`**: the same diagram, editable in [draw.io](https://www.drawio.com/)
+  (desktop or browser). draw.io can also export it to Visio, PDF or PNG.
+- JSON files with the raw data and the topology, for scripting.
+
+## Quick start on Windows (no Python needed)
+
+1. Download `netmapper-windows` from the latest run of the
+   [CI workflow](../../actions/workflows/ci.yml) (or from a release), and unzip it to a folder.
+2. Double-click `netmapper.exe`. On the first run it writes a `config.toml` for the network
+   the PC is on, maps it using only the PC's ARP cache, and opens the diagram.
+3. For the full picture, add read-only SNMP credentials for your managed switches to
+   `config.toml` (see [Configuration](#configuration)) and run it again.
+
+From a terminal you get more control:
+
+```powershell
+.\netmapper.exe init                 # write config.toml (won't overwrite)
+.\netmapper.exe discover --open      # map, draw, open the diagram
+.\netmapper.exe discover --show      # also print the topology as an outline
+.\netmapper.exe topology --open      # redraw from the last run without touching the network
+.\netmapper.exe update-oui           # one-off: download the MAC vendor list from the IEEE
+```
+
+Windows SmartScreen may warn the first time because the .exe isn't code-signed. Choose
+"More info", then "Run anyway", or run it from source as below.
 
 ## How it finds things
 
 | Source | What it gives | Traffic it creates |
 | --- | --- | --- |
 | Local ARP cache (`arp -a`) | IP and MAC of hosts this PC has talked to recently | None |
-| SNMP on managed switches and routers (read-only) | LLDP/CDP neighbours (switch-to-switch links), MAC table per port, router ARP table | A few SNMP GET/GETBULK requests per device, the same as any monitoring system |
+| SNMP on managed switches and routers (read-only) | LLDP/CDP neighbours, the MAC table per port, router ARP table | A few SNMP GET/GETBULK requests per device, the same as any monitoring system |
 | Slow ping sweep (**off by default**) | Fills the ARP cache with hosts that are up | One ping at a time, with a pause between them |
+| Reverse DNS (**off by default**) | Host names for labels | One DNS query per host, to your normal DNS server |
 
 It never port scans, fingerprints operating systems, or sends SNMP writes. When it
 follows LLDP/CDP neighbours to other switches, it only queries neighbours that are
 network gear (switches, routers, access points) inside the subnets you configure,
 never phones or PCs. There is also an opt-in setting that tries SNMP on every host it
 finds. It's off by default because an SNMP sweep is exactly what IDS rules look for.
+`init` finds the PC's address and gateway locally, without sending anything.
+`update-oui` is the only command that talks to the internet.
 
 ## How it works out the connections
 
@@ -36,49 +66,52 @@ finds. It's off by default because an SNMP sweep is exactly what IDS rules look 
    an access point or a switch that couldn't be queried are attached to that device instead.
 5. Hosts seen only in an ARP cache, with no switch port, go under "Location unknown".
 
-Links worked out in steps 2 to 4 are marked as inferred. One known limit is that a server
-running several VMs on one port also looks like an unmanaged switch.
+Inferred links are dashed on the diagram. Some limits:
 
-## Install (Windows)
+- A server running several VMs on one port also looks like an unmanaged switch.
+- With no managed switches, or no SNMP credentials, all it can show is which devices exist,
+  not how they're cabled.
+- Devices that haven't sent traffic recently may have aged out of the switches' MAC tables.
+  Running it during working hours gives the fullest picture.
 
-1. Install Python 3.11 or newer from python.org (tick "Add python.exe to PATH").
-2. In PowerShell, from this folder:
+## Configuration
 
-   ```powershell
-   py -m venv .venv
-   .venv\Scripts\Activate.ps1
-   pip install .
-   ```
+`netmapper init` writes a starter `config.toml`. [`config.example.toml`](config.example.toml)
+explains every option. The main ones are:
 
-## Use
+```toml
+[discovery]
+subnets = ["192.168.1.0/24"]
 
-1. Copy `config.example.toml` to `config.toml`. Set your subnets, the IPs of your
-   core switch and router, and an SNMP read-only community or v3 user.
-2. Put secrets in environment variables rather than the file, for example:
+[snmp]
+seeds = ["192.168.1.1", "192.168.1.2"]   # core switch and router; others are found via LLDP/CDP
 
-   ```powershell
-   $env:SNMP_COMMUNITY = "your-read-only-community"
-   ```
+[[snmp.credentials]]
+version = "2c"
+community = "env:SNMP_COMMUNITY"          # read from an environment variable
+```
 
-3. Run:
+Set the secret before running, for example `$env:SNMP_COMMUNITY = "..."` in PowerShell.
+SNMPv3 (SHA/AES) is supported too. Several credential blocks can be listed, and each one
+is tried in turn.
 
-   ```powershell
-   netmapper discover -c config.toml
-   ```
+## Re-running
 
-Each run saves `runs/discovery-<time>.json` (the raw data) and `runs/topology-<time>.json`
-(devices and links), plus `latest.json` and `topology-latest.json` for the newest. Useful
-flags: `--show` (print the topology as an outline), `--no-snmp` (ARP cache only),
-`--ping-sweep` (turn the slow sweep on for this run), `-v` (debug logging).
+Run it as often as you like, for example from Windows Task Scheduler. Each run keeps
+timestamped copies in `runs/`, and the `*-latest` files are the newest. The HTML page and
+the console list devices that are new, gone, or have moved to a different switch port
+since the previous run. New devices are outlined in green on the diagram.
 
-Other commands:
+## Run from source
 
-- `netmapper topology -c config.toml --show [RUN.json]` rebuilds the topology from a saved
-  run without touching the network (defaults to the latest run).
-- `netmapper update-oui -c config.toml` downloads the IEEE MAC vendor list once, so devices
-  show their maker. It's the only command that goes to the internet.
+Needs Python 3.11 or newer.
 
-Optional: set `resolve_names = true` under `[topology]` to label hosts by reverse DNS.
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install .
+netmapper discover --open
+```
 
 ## Development
 
@@ -88,5 +121,14 @@ pytest
 ```
 
 The SNMP parsing is tested against an in-memory fake agent. If `snmpsim` is installed
-(`pip install snmpsim pysmi`), `tests/test_snmp_live.py` also runs the real SNMP client
-against a simulated switch over UDP.
+(`pip install snmpsim pysmi`), the real SNMP client is also tested against a simulated
+switch over UDP.
+
+To build the Windows executable: `pip install ".[build]"`, then run
+`python packaging/build_exe.py`, which writes `dist/netmapper.exe`. After that,
+`python packaging/smoke_test.py dist/netmapper.exe` runs it end to end.
+
+CI (GitHub Actions) runs the tests on Windows and Linux. It then builds `netmapper.exe`
+on Windows, smoke tests it there (including a run against a simulated SNMP switch), and
+uploads it as the `netmapper-windows` artifact. Pushing a tag such as `v1.0.0` also
+publishes a release with the .exe attached.

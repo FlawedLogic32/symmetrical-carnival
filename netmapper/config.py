@@ -41,6 +41,7 @@ class Config:
     snmp_credentials: list[SnmpCredential] = field(default_factory=list)
     snmp_timeout_seconds: float = 2.0
     snmp_retries: int = 1
+    snmp_port: int = 161
     crawl_neighbors: bool = True
     probe_discovered_hosts: bool = False
     max_devices: int = 200
@@ -119,6 +120,7 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
         snmp_credentials=[_credential(c) for c in snmp.get("credentials", [])],
         snmp_timeout_seconds=float(snmp.get("timeout_seconds", 2.0)),
         snmp_retries=int(snmp.get("retries", 1)),
+        snmp_port=int(snmp.get("port", 161)),
         crawl_neighbors=bool(snmp.get("crawl_neighbors", True)),
         probe_discovered_hosts=bool(snmp.get("probe_discovered_hosts", False)),
         max_devices=int(snmp.get("max_devices", 200)),

@@ -151,3 +151,16 @@ def test_oui_csv(tmp_path):
     assert vendors.vendor(AP) == "Aruba, a Hewlett Packard Enterprise Company"
     assert vendors.vendor("00:00:00:00:00:01") is None
     assert len(VendorLookup.load_if_present(tmp_path / "missing.csv")) == 0
+
+
+def test_tree_starts_at_queried_switch_when_there_is_no_router():
+    from fake_snmp import FakeSnmp
+    from test_snmp_device import core_switch
+
+    from netmapper.collectors.snmp_device import collect_device
+
+    dev = collect_device(FakeSnmp(core_switch()), "192.168.1.2")
+    hosts = [Host(None, f.mac, ["fdb"]) for f in dev.fdb]
+    tree = render_tree(build_topology(DiscoveryRun(started_at="t", devices=[dev], hosts=hosts)))
+    # The inferred unmanaged switch has more links, but the real switch comes first.
+    assert tree.startswith("core-sw (switch")
