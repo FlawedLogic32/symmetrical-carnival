@@ -27,6 +27,10 @@ subnets = ["{subnet}"]
 ping_sweep = false
 ping_interval_seconds = 0.5
 
+# Seconds to listen for devices announcing themselves (mDNS, SSDP, LLMNR). Sends
+# nothing. 0 turns it off; 60 is a good value. Windows Firewall may ask to allow it.
+listen_seconds = 0
+
 [snmp]
 # Managed switches and routers to read. {seed_comment}
 seeds = [{seeds}]
@@ -34,8 +38,9 @@ crawl_neighbors = true
 probe_discovered_hosts = false
 
 # Until you add read-only SNMP credentials, netmapper uses only this PC's ARP cache.
-# Uncomment one block, and set the secret as an environment variable, for example
-# in PowerShell:  $env:SNMP_COMMUNITY = "your-read-only-community"
+# The easy way to add them is "netmapper snmp-setup", which asks for each setting,
+# tests it, and stores the passphrases encrypted. Or uncomment a block below and set
+# the secret as an environment variable, e.g. $env:SNMP_COMMUNITY = "..." in PowerShell.
 #
 # [[snmp.credentials]]
 # version = "2c"
@@ -48,6 +53,12 @@ probe_discovered_hosts = false
 # auth_key = "env:SNMP_AUTH"
 # priv_protocol = "aes"
 # priv_key = "env:SNMP_PRIV"
+
+[dhcp]
+# DHCP leases list devices that are quiet right now. Point at exported lease files
+# (dnsmasq, dhcpd.leases or CSV), or name Windows DHCP servers to read directly.
+lease_files = []
+windows_servers = []
 
 [topology]
 resolve_names = false

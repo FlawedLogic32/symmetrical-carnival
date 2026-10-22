@@ -102,3 +102,13 @@ Network Destination        Netmask          Gateway       Interface  Metric
     with mock.patch.object(init, "IS_WINDOWS", True), \
             mock.patch.object(init, "_run", return_value=route):
         assert init.default_gateway() == "10.1.0.1"
+
+
+def test_double_click_without_keyboard_skips_snmp_setup(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("NETMAPPER_NO_BROWSER", "1")
+    with mock.patch.object(cli, "_interactive", return_value=True), \
+            mock.patch("builtins.input", side_effect=EOFError), \
+            mock.patch("netmapper.discovery.local.read_arp_cache", return_value=[]):
+        assert cli.main([]) == 0
+    assert (tmp_path / "config.toml").exists()
