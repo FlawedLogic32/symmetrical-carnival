@@ -8,6 +8,7 @@ KIND_NAMES = {
     "router": "Router",
     "switch": "Switch",
     "unmanaged-switch": "Unmanaged switch (inferred)",
+    "vm-host": "VM host",
     "access-point": "Access point",
     "phone": "Phone",
     "network-device": "Network device",
@@ -20,6 +21,7 @@ KIND_COLORS = {
     "router": ("#dbeafe", "#2563eb"),
     "switch": ("#dcfce7", "#16a34a"),
     "unmanaged-switch": ("#f1f5f9", "#64748b"),
+    "vm-host": ("#ecfeff", "#0891b2"),
     "access-point": ("#fef3c7", "#d97706"),
     "phone": ("#ede9fe", "#7c3aed"),
     "network-device": ("#e0f2fe", "#0284c7"),
@@ -41,6 +43,8 @@ def box_lines(node: Node, leaf: bool, parent_port: str | None) -> list[str]:
     """Text shown inside a node's box: the label first, then up to two detail lines."""
     if node.kind == "unmanaged-switch":
         return ["Unmanaged switch", "inferred from MAC tables"]
+    if node.kind == "vm-host" and node.inferred:
+        return ["VM host", "inferred from VM MACs"]
     if node.kind == "unknown-segment":
         return [node.label, "not seen on any switch port"]
     lines = [node.label]
