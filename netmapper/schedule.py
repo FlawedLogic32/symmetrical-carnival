@@ -68,11 +68,13 @@ def task_xml(schedule: Schedule, config: Path, user: str | None = None,
     user = user or _current_user()
     start = (today or datetime.now()).strftime("%Y-%m-%d") + f"T{schedule.at}:00"
     repeat = ""
-    if schedule.every_hours:
-        hour, minute = (int(x) for x in schedule.at.split(":"))
-        left = 24 * 60 - (hour * 60 + minute)  # repeat until midnight
+    hour, minute = (int(x) for x in schedule.at.split(":"))
+    left = 24 * 60 - (hour * 60 + minute)  # repeat until midnight
+    # Task Scheduler rejects a repetition that lasts no longer than its interval; that
+    # late in the day there is only the one run anyway.
+    if schedule.every_hours and left > schedule.every_hours * 60:
         repeat = (f"<Repetition><Interval>PT{schedule.every_hours}H</Interval>"
-                  f"<Duration>PT{left // 60}H{left % 60}M</Duration><StopAtDurationEnd>false</StopAtDurationEnd>"
+                  f"<Duration>PT{left // 60}H{f'{left % 60}M' if left % 60 else ''}</Duration><StopAtDurationEnd>false</StopAtDurationEnd>"
                   "</Repetition>")
     if schedule.weekdays_only:
         days = "".join(f"<{d} />" for d in WEEKDAYS)

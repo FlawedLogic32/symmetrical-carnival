@@ -37,11 +37,20 @@ def test_task_xml_hourly_weekdays_background(tmp_path):
     plan = schedule.Schedule(at="08:00", every_hours=2, weekdays_only=True, background=True)
     task = parse(schedule.task_xml(plan, tmp_path / "config.toml", user="tom"))
     assert task.find(".//t:Repetition/t:Interval", NS).text == "PT2H"
-    assert task.find(".//t:Repetition/t:Duration", NS).text == "PT16H0M"
+    assert task.find(".//t:Repetition/t:Duration", NS).text == "PT16H"
     days = [d.tag.split("}")[1] for d in task.find(".//t:DaysOfWeek", NS)]
     assert days == list(schedule.WEEKDAYS)
     assert task.find(".//t:LogonType", NS).text == "S4U"
     assert plan.describe() == "every 2h from 08:00, on weekdays"
+
+
+def test_no_repetition_when_too_late_to_repeat(tmp_path):
+    plan = schedule.Schedule(at="23:30", every_hours=1)
+    task = parse(schedule.task_xml(plan, tmp_path / "config.toml", user="tom"))
+    assert task.find(".//t:Repetition", NS) is None
+    plan = schedule.Schedule(at="08:15", every_hours=1)
+    task = parse(schedule.task_xml(plan, tmp_path / "config.toml", user="tom"))
+    assert task.find(".//t:Repetition/t:Duration", NS).text == "PT15H45M"
 
 
 def test_parse_time_and_cron(tmp_path):

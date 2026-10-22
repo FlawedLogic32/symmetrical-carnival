@@ -82,7 +82,7 @@ def main(exe: Path) -> None:
         # Check Task Scheduler accepts the task definition, then clean up.
         name = "netmapper-smoke-test"
         try:
-            run(exe, "schedule", "--name", name, "--at", "23:59", "--every-hours", "1",
+            run(exe, "schedule", "--name", name, "--at", "08:00", "--every-hours", "2",
                 "--weekdays", cwd=work)
             print(run(exe, "schedule", "--name", name, "--status", cwd=work).stdout)
         finally:
