@@ -3,8 +3,9 @@
     python packaging/smoke_test.py dist/netmapper.exe
 
 Checks: --version, init, an ARP-only run on this machine, a scheduled-style run, creating
-and removing a Task Scheduler task (on Windows), double-click mode, and (if
-snmpsim is installed) a full run against a simulated switch over real SNMP.
+and removing a Task Scheduler task (on Windows), that snmp-setup exits cleanly with no one
+at the keyboard, double-click mode, and (if snmpsim is installed) full runs against a
+simulated switch over real SNMPv2c and SNMPv3 (with a DPAPI-encrypted secret on Windows).
 """
 
 import os
@@ -88,6 +89,11 @@ def main(exe: Path) -> None:
         finally:
             run(exe, "schedule", "--name", name, "--remove", cwd=work, check=False)
 
+    # With no one at the keyboard the wizard must stop cleanly, not hang or crash.
+    out = run(exe, "snmp-setup", cwd=work, check=False).stdout
+    if "Cancelled" not in out:
+        raise SystemExit("snmp-setup did not stop cleanly without input")
+
     double = Path(tempfile.mkdtemp(prefix="netmapper-dbl-"))
     run(exe, cwd=double)  # no arguments, as if double-clicked
     expect(double / "config.toml")
@@ -106,7 +112,9 @@ def main(exe: Path) -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    args = [responder, f"--data-dir={sim / 'data'}", f"--cache-dir={sim / 'cache'}",
+    args = [responder, "--v3-engine-id=auto", "--v3-user=netmapper",
+            "--v3-auth-key=auth-pass-1", "--v3-auth-proto=SHA", "--v3-priv-key=priv-pass-1",
+            "--v3-priv-proto=AES", f"--data-dir={sim / 'data'}", f"--cache-dir={sim / 'cache'}",
             f"--agent-udpv4-endpoint=127.0.0.1:{port}"]
     if hasattr(os, "geteuid") and os.geteuid() == 0:
         for p in [sim, *sim.rglob("*")]:
@@ -126,6 +134,25 @@ def main(exe: Path) -> None:
             raise SystemExit("the simulated switch was not read over SNMP")
         expect(snmp / "runs" / "network-latest.html", "core-sw")
         expect(snmp / "runs" / "network-latest.drawio", "Unmanaged switch")
+
+        # SNMPv3 with encryption, with the passphrase stored the way snmp-setup does it.
+        from netmapper.secret_store import DPAPI_AVAILABLE, dpapi_protect
+
+        key = dpapi_protect("priv-pass-1") if DPAPI_AVAILABLE else "priv-pass-1"
+        v3 = work / "snmpv3"
+        v3.mkdir()
+        (v3 / "config.toml").write_text(
+            '[discovery]\nsubnets = ["192.168.1.0/24"]\n'
+            f'[snmp]\nseeds = ["127.0.0.1"]\nport = {port}\n'
+            '[[snmp.credentials]]\nversion = "3"\nusername = "netmapper"\n'
+            'auth_protocol = "sha"\nauth_key = "auth-pass-1"\n'
+            f'priv_protocol = "aes"\npriv_key = "{key}"\n'
+            # snmpsim picks its data by context name; real switches use the default.
+            'context = "public"\n', encoding="utf-8")
+        out = run(exe, "discover", cwd=v3).stdout
+        if "1 managed devices" not in out:
+            raise SystemExit("the simulated switch was not read over SNMPv3")
+        print(f"ok: SNMPv3 (SHA/AES{', DPAPI secret' if DPAPI_AVAILABLE else ''})")
     finally:
         proc.terminate()
     print("smoke test passed")

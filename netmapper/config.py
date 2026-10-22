@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 import ipaddress
-import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .secret_store import SecretError, resolve_secret
+
 
 class ConfigError(ValueError):
     pass
+
+
+# SNMPv3 protocol names accepted in the config, with the aliases people commonly type.
+AUTH_PROTOCOLS = ["md5", "sha", "sha224", "sha256", "sha384", "sha512"]
+PRIV_PROTOCOLS = ["des", "3des", "aes", "aes192", "aes256", "aes192c", "aes256c"]
+PROTOCOL_ALIASES = {"sha1": "sha", "aes128": "aes", "none": None, "": None}
+# The two ways vendors stretch keys for AES-192/256, named as in Net-SNMP: Cisco uses
+# the "c" variant, most others the plain one. A wrong guess shows up as a decryption error.
+AES_KEY_VARIANTS = {"aes192": "aes192c", "aes192c": "aes192",
+                    "aes256": "aes256c", "aes256c": "aes256"}
+MIN_V3_KEY_LENGTH = 8  # RFC 3414: shorter passphrases are rejected by agents
 
 
 @dataclass
@@ -18,10 +30,11 @@ class SnmpCredential:
     version: str  # "1", "2c" or "3"
     community: str | None = None
     username: str | None = None
-    auth_protocol: str | None = None  # "md5", "sha", "sha256", "sha512"
+    auth_protocol: str | None = None  # one of AUTH_PROTOCOLS
     auth_key: str | None = None
-    priv_protocol: str | None = None  # "des", "aes", "aes256"
+    priv_protocol: str | None = None  # one of PRIV_PROTOCOLS
     priv_key: str | None = None
+    context: str | None = None  # SNMPv3 context name; almost always left empty
 
     def label(self) -> str:
         """A description safe to log: never includes the secret."""
@@ -83,6 +96,9 @@ class Config:
     crawl_neighbors: bool = True
     probe_discovered_hosts: bool = False
     max_devices: int = 200
+    listen_seconds: float = 0
+    dhcp_lease_files: list[Path] = field(default_factory=list)
+    windows_dhcp_servers: list[str] = field(default_factory=list)
     output_directory: Path = Path("runs")
     resolve_names: bool = False
     oui_file: Path = Path("oui.csv")
@@ -92,14 +108,41 @@ class Config:
 
 
 def _secret(value: str | None) -> str | None:
-    """Values written as ``env:NAME`` are read from that environment variable,
-    so passwords don't have to sit in the config file."""
-    if value and value.startswith("env:"):
-        name = value[4:]
-        if name not in os.environ:
-            raise ConfigError(f"environment variable {name} is not set")
-        return os.environ[name]
-    return value
+    """Values written as ``env:NAME`` or ``dpapi:...`` are read from an environment
+    variable or decrypted, so passwords don't have to sit in the config file."""
+    try:
+        return resolve_secret(value)
+    except SecretError as exc:
+        raise ConfigError(str(exc)) from None
+
+
+def _protocol(value, allowed: list[str], what: str) -> str | None:
+    if value is None:
+        return None
+    name = str(value).strip().lower().replace("-", "")
+    name = PROTOCOL_ALIASES.get(name, name)
+    if name is not None and name not in allowed:
+        raise ConfigError(f"unsupported SNMPv3 {what} protocol {value!r}; "
+                          f"use one of {', '.join(allowed)}")
+    return name
+
+
+def check_v3(cred: SnmpCredential) -> None:
+    """Catch SNMPv3 mistakes here, with a clear message, rather than as a timeout later."""
+    who = f"SNMPv3 user '{cred.username}'"
+    if cred.auth_key and not cred.auth_protocol:
+        raise ConfigError(f"{who}: auth_key is set but auth_protocol is not (e.g. \"sha\")")
+    if cred.priv_key and not cred.priv_protocol:
+        raise ConfigError(f"{who}: priv_key is set but priv_protocol is not (e.g. \"aes\")")
+    if cred.auth_protocol and not cred.auth_key:
+        raise ConfigError(f"{who}: auth_protocol is set but auth_key is missing")
+    if cred.priv_protocol and not cred.priv_key:
+        raise ConfigError(f"{who}: priv_protocol is set but priv_key is missing")
+    if cred.priv_protocol and not cred.auth_protocol:
+        raise ConfigError(f"{who}: encryption (priv) needs authentication (auth) as well")
+    for name, key in (("auth_key", cred.auth_key), ("priv_key", cred.priv_key)):
+        if key and len(key) < MIN_V3_KEY_LENGTH:
+            raise ConfigError(f"{who}: {name} must be at least {MIN_V3_KEY_LENGTH} characters")
 
 
 def _credential(raw: dict) -> SnmpCredential:
@@ -110,15 +153,18 @@ def _credential(raw: dict) -> SnmpCredential:
         version=version,
         community=_secret(raw.get("community")),
         username=raw.get("username"),
-        auth_protocol=(raw.get("auth_protocol") or None),
+        auth_protocol=_protocol(raw.get("auth_protocol"), AUTH_PROTOCOLS, "auth"),
         auth_key=_secret(raw.get("auth_key")),
-        priv_protocol=(raw.get("priv_protocol") or None),
+        priv_protocol=_protocol(raw.get("priv_protocol"), PRIV_PROTOCOLS, "priv"),
         priv_key=_secret(raw.get("priv_key")),
+        context=raw.get("context") or None,
     )
     if version in {"1", "2c"} and not cred.community:
         raise ConfigError("SNMP v1/v2c credentials need a community")
-    if version == "3" and not cred.username:
-        raise ConfigError("SNMP v3 credentials need a username")
+    if version == "3":
+        if not cred.username:
+            raise ConfigError("SNMP v3 credentials need a username")
+        check_v3(cred)
     return cred
 
 
@@ -193,6 +239,7 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
     out = raw.get("output", {})
     topo = raw.get("topology", {})
     alerts = raw.get("alerts", {})
+    dhcp = raw.get("dhcp", {})
     diagram = raw.get("diagram", {})
 
     try:
@@ -206,6 +253,8 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
     oui_file = Path(topo.get("oui_file", "oui.csv"))
     if not oui_file.is_absolute():
         oui_file = base_dir / oui_file
+    lease_files = [Path(p) for p in dhcp.get("lease_files", [])]
+    lease_files = [p if p.is_absolute() else base_dir / p for p in lease_files]
 
     return Config(
         subnets=subnets,
@@ -221,6 +270,9 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
         crawl_neighbors=bool(snmp.get("crawl_neighbors", True)),
         probe_discovered_hosts=bool(snmp.get("probe_discovered_hosts", False)),
         max_devices=int(snmp.get("max_devices", 200)),
+        listen_seconds=float(disc.get("listen_seconds", 0)),
+        dhcp_lease_files=lease_files,
+        windows_dhcp_servers=[str(s) for s in dhcp.get("windows_servers", [])],
         output_directory=output_dir,
         resolve_names=bool(topo.get("resolve_names", False)),
         oui_file=oui_file,

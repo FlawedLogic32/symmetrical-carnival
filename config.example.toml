@@ -2,6 +2,8 @@
 #
 # Anything secret can be written as "env:NAME" to read it from an environment
 # variable instead of keeping it in this file, for example community = "env:SNMP_COMMUNITY".
+# On Windows, "netmapper snmp-setup" can also store it as "dpapi:...": encrypted so only
+# the same Windows user on the same PC can use it.
 
 [discovery]
 # The networks to map. Hosts outside these are ignored, and neighbour crawling
@@ -13,6 +15,14 @@ subnets = ["192.168.1.0/24"]
 ping_sweep = false
 ping_interval_seconds = 0.5
 ping_timeout_ms = 1000
+
+# Seconds to listen for devices announcing themselves: mDNS (printers, TVs, phones,
+# Macs), SSDP/UPnP (media and IoT devices) and LLMNR (Windows PCs looking up names).
+# netmapper sends nothing; it only receives what these devices already broadcast, and
+# it listens while the rest of discovery runs. 0 turns it off. Windows Firewall may ask
+# whether netmapper can receive on the network the first time; allow it on private
+# networks or nothing will be heard.
+listen_seconds = 0
 
 [snmp]
 enabled = true
@@ -32,6 +42,7 @@ retries = 1
 probe_discovered_hosts = false
 
 # Tried in order on each device until one works. Read-only access is all that's needed.
+# "netmapper snmp-setup" adds a block like these for you, after testing it on a switch.
 [[snmp.credentials]]
 version = "2c"
 community = "env:SNMP_COMMUNITY"
@@ -39,10 +50,28 @@ community = "env:SNMP_COMMUNITY"
 # [[snmp.credentials]]
 # version = "3"
 # username = "netmapper"
-# auth_protocol = "sha"        # md5, sha, sha256, sha512
-# auth_key = "env:SNMP_AUTH"
-# priv_protocol = "aes"        # des, aes, aes256
-# priv_key = "env:SNMP_PRIV"
+# auth_protocol = "sha"        # md5, sha, sha224, sha256, sha384, sha512
+# auth_key = "env:SNMP_AUTH"   # at least 8 characters
+# priv_protocol = "aes"        # des, 3des, aes, aes192, aes256, aes192c, aes256c
+# priv_key = "env:SNMP_PRIV"   # leave out priv_* for authNoPriv
+# context = ""                 # SNMPv3 context name; leave empty unless told otherwise
+#
+# aes192c/aes256c are the Cisco way of deriving AES-192/256 keys (as in Net-SNMP).
+# If AES-192/256 fails with a decryption error, try the other variant.
+
+[dhcp]
+# Devices that are switched off or quiet are missing from ARP caches and MAC tables,
+# but still hold a DHCP lease. Both options are off until you fill them in.
+#
+# Lease files, relative to this file. Reading them sends nothing. Understood formats:
+# dnsmasq (most routers, OpenWrt, Pi-hole), ISC dhcpd.leases (pfSense, Linux), and
+# CSV/tab-separated exports with a header row, e.g. from Windows Server:
+#   Get-DhcpServerv4Scope | Get-DhcpServerv4Lease | Export-Csv leases.csv
+lease_files = []
+# Windows DHCP servers to read leases from directly with PowerShell, the same call the
+# DHCP console makes. Needs the DhcpServer PowerShell module (part of RSAT) and an
+# account in the server's "DHCP Users" group.
+windows_servers = []
 
 [topology]
 # Look up hostnames with reverse DNS through your normal DNS server. It's off by

@@ -66,7 +66,7 @@ class PySnmpClient:
         self._target = self._loop.run_until_complete(
             hlapi.UdpTransportTarget.create((host, port), timeout=timeout, retries=retries)
         )
-        self._context = hlapi.ContextData()
+        self._context = hlapi.ContextData(contextName=credential.context or "")
 
     def _auth_data(self, cred: SnmpCredential):
         h = self._hlapi
@@ -78,14 +78,22 @@ class PySnmpClient:
             None: h.usmNoAuthProtocol,
             "md5": h.usmHMACMD5AuthProtocol,
             "sha": h.usmHMACSHAAuthProtocol,
+            "sha224": h.usmHMAC128SHA224AuthProtocol,
             "sha256": h.usmHMAC192SHA256AuthProtocol,
+            "sha384": h.usmHMAC256SHA384AuthProtocol,
             "sha512": h.usmHMAC384SHA512AuthProtocol,
         }
         priv_protocols = {
             None: h.usmNoPrivProtocol,
             "des": h.usmDESPrivProtocol,
+            "3des": h.usm3DESEDEPrivProtocol,
             "aes": h.usmAesCfb128Protocol,
-            "aes256": h.usmAesCfb256Protocol,
+            # Same names as Net-SNMP: plain is the Blumenthal key extension, "c" is
+            # the Reeder extension that Cisco uses. pysnmp names them the other way.
+            "aes192": h.usmAesBlumenthalCfb192Protocol,
+            "aes256": h.usmAesBlumenthalCfb256Protocol,
+            "aes192c": h.usmAesCfb192Protocol,
+            "aes256c": h.usmAesCfb256Protocol,
         }
         try:
             auth = auth_protocols[cred.auth_protocol.lower() if cred.auth_protocol else None]

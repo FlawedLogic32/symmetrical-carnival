@@ -64,9 +64,9 @@ ICONS: dict[str, list[Primitive]] = {
     # A computer screen on a stand.
     "host": [_rect(3, 4, 21, 16), ("line", [(12, 16), (12, 20)], False),
              ("line", [(7, 20.5), (17, 20.5)], False)],
-    # A server with three stacked boxes (virtual machines) on its front.
-    "vm-host": [_rect(3, 3, 21, 21), _rect(6, 6, 18, 9), _rect(6, 10.5, 18, 13.5),
-                _rect(6, 15, 18, 18)],
+    # A server holding several virtual machines.
+    "vm-host": [_rect(3, 3, 21, 21), _rect(6, 6, 18, 9.5), _rect(6, 10.5, 18, 14),
+                _rect(6, 15, 18, 18.5)],
     # A question mark in a circle.
     "unknown-segment": [("circle", 12, 12, 10), _arc(12, 9.5, 3, 180, 405, 12),
                         ("line", [(14.12, 11.62), (12, 13), (12, 14.5)], False),
