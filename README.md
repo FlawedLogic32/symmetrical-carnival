@@ -23,14 +23,16 @@ Each run produces:
 1. Download `netmapper-windows` from the latest run of the
    [CI workflow](../../actions/workflows/ci.yml) (or from a release), and unzip it to a folder.
 2. Double-click `netmapper.exe`. On the first run it writes a `config.toml` for the network
-   the PC is on, maps it using only the PC's ARP cache, and opens the diagram.
-3. For the full picture, add read-only SNMP credentials for your managed switches to
-   `config.toml` (see [Configuration](#configuration)) and run it again.
+   the PC is on, offers to set up SNMP credentials, maps the network and opens the diagram.
+   Without credentials it uses only the PC's ARP cache.
+3. For the full picture, run `.\netmapper.exe snmp-setup` to add read-only SNMP credentials
+   for your managed switches (see [SNMP credentials](#snmp-credentials)), and run it again.
 
 From a terminal you get more control:
 
 ```powershell
 .\netmapper.exe init                 # write config.toml (won't overwrite)
+.\netmapper.exe snmp-setup           # add SNMPv3 or v2c credentials, tested and stored safely
 .\netmapper.exe discover --open      # map, draw, open the diagram
 .\netmapper.exe discover --show      # also print the topology as an outline
 .\netmapper.exe topology --open      # redraw from the last run without touching the network
@@ -46,7 +48,10 @@ whether its .exe is signed, and `SHA256SUMS.txt` lets you check the download.
 | Source | What it gives | Traffic it creates |
 | --- | --- | --- |
 | Local ARP cache (`arp -a`) | IP and MAC of hosts this PC has talked to recently | None |
-| SNMP on managed switches and routers (read-only) | LLDP/CDP neighbours, the MAC table per port, router ARP table | A few SNMP GET/GETBULK requests per device, the same as any monitoring system |
+| SNMP on managed switches and routers (read-only) | LLDP/CDP neighbours, the MAC table per port, router ARP table (old and new IP-MIB tables) | A few SNMP GET/GETBULK requests per device, the same as any monitoring system |
+| DHCP lease files (**off until configured**) | IP, MAC and name of every device holding a lease, including quiet ones | None: it reads a file you exported |
+| Windows DHCP server (**off until configured**) | The same, read live from the server | One management call per server, the same as opening the DHCP console |
+| Listening for announcements (**off by default**) | IPs (and often names) of printers, TVs, phones, IoT and PCs that announce themselves over mDNS, SSDP or LLMNR | None: it only receives |
 | Slow ping sweep (**off by default**) | Fills the ARP cache with hosts that are up | One ping at a time, with a pause between them |
 | Reverse DNS (**off by default**) | Host names for labels | One DNS query per host, to your normal DNS server |
 
@@ -82,7 +87,9 @@ Inferred links are dashed on the diagram. Some limits:
 - With no managed switches, or no SNMP credentials, all it can show is which devices exist,
   not how they're cabled.
 - Devices that haven't sent traffic recently may have aged out of the switches' MAC tables.
-  Running it during working hours gives the fullest picture.
+  Running it during working hours gives the fullest picture. DHCP leases and listening
+  (below) catch many of the quiet ones, though without a switch port they go under
+  "Location unknown".
 
 ## Configuration
 
@@ -102,8 +109,57 @@ community = "env:SNMP_COMMUNITY"          # read from an environment variable
 ```
 
 Set the secret before running, for example `$env:SNMP_COMMUNITY = "..."` in PowerShell.
-SNMPv3 (SHA/AES) is supported too. Several credential blocks can be listed, and each one
-is tried in turn.
+Several credential blocks can be listed, and each one is tried in turn.
+
+### SNMP credentials
+
+`netmapper snmp-setup` adds a credential block for you. It asks for the SNMP version
+(v3 is the default), the username, security level, authentication and encryption
+protocols and passphrases, then tests them against one switch with a single SNMP request.
+If the test fails it says what most likely doesn't match (unknown user, wrong
+authentication passphrase, wrong encryption passphrase, wrong security level, or no answer
+at all), and saves nothing unless you ask it to. For AES-192/256 it tries both ways
+vendors derive the key and keeps the one that works. The switch it tested against is
+added to the SNMP seeds.
+
+It can keep the passphrases:
+
+- **encrypted** in `config.toml` (Windows, the default). They are stored as `dpapi:...`,
+  encrypted with Windows' Data Protection API, so only the same Windows user on the same
+  PC can use them. Scheduled runs under that user work; copying the file elsewhere doesn't
+  give the passphrases away.
+- in **environment variables**. It prints the `setx` commands to run, without the secret.
+- as **plain text** in `config.toml`, if you must.
+
+Supported SNMPv3 protocols: authentication `md5`, `sha`, `sha224`, `sha256`, `sha384`,
+`sha512`; encryption `des`, `3des`, `aes`, `aes192`, `aes256`, and `aes192c`/`aes256c`
+(the Cisco key derivation, named as in Net-SNMP).
+
+### Finding quiet devices
+
+Devices that are idle, asleep or behind a switch netmapper can't read are easy to miss.
+Two extra sources help, without scanning:
+
+```toml
+[discovery]
+listen_seconds = 60          # listen for mDNS/SSDP/LLMNR announcements; sends nothing
+
+[dhcp]
+lease_files = ["leases.csv"] # exported lease lists: dnsmasq, dhcpd.leases or CSV
+windows_servers = ["dc01"]   # read leases live from Windows DHCP servers
+```
+
+- **DHCP lease files** can come from most routers (dnsmasq format, e.g. OpenWrt or Pi-hole),
+  pfSense or Linux (`dhcpd.leases`), Kea, or Windows Server
+  (`Get-DhcpServerv4Scope | Get-DhcpServerv4Lease | Export-Csv leases.csv`, or "Export
+  List" in the DHCP console). Only active leases are used, and their host names label the
+  diagram.
+- **Windows DHCP servers** are read with `Get-DhcpServerv4Lease`. This needs the DhcpServer
+  PowerShell module (part of RSAT) and an account in the server's "DHCP Users" group.
+- **Listening** joins the mDNS, SSDP and LLMNR multicast groups and notes who speaks,
+  while the rest of discovery runs. It never sends a query. Windows Firewall may ask
+  whether netmapper can receive on the network the first time; allow it on private
+  networks, or nothing will be heard.
 
 ## Diagram
 
