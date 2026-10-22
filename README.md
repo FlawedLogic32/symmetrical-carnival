@@ -37,6 +37,7 @@ From a terminal you get more control:
 .\netmapper.exe discover --show      # also print the topology as an outline
 .\netmapper.exe topology --open      # redraw from the last run without touching the network
 .\netmapper.exe update-oui           # one-off: download the MAC vendor list from the IEEE
+.\netmapper.exe schedule             # map every day at 08:00 (alerts are opt-in)
 ```
 
 Windows SmartScreen may warn the first time because the .exe isn't code-signed. Choose
@@ -60,7 +61,8 @@ network gear (switches, routers, access points) inside the subnets you configure
 never phones or PCs. There is also an opt-in setting that tries SNMP on every host it
 finds. It's off by default because an SNMP sweep is exactly what IDS rules look for.
 `init` finds the PC's address and gateway locally, without sending anything.
-`update-oui` is the only command that talks to the internet.
+`update-oui` is the only command that talks to the internet, apart from email or
+webhook alerts if you set them up.
 
 ## How it works out the connections
 
@@ -177,12 +179,45 @@ Devices you don't list join the group of the switch they plug into, so naming ea
 switches is usually enough. Groups only change how the diagram is drawn; rerun
 `netmapper topology` after editing them to redraw without touching the network.
 
-## Re-running
+## Scheduled runs and alerts
 
-Run it as often as you like, for example from Windows Task Scheduler. Each run keeps
-timestamped copies in `runs/`, and the `*-latest` files are the newest. The HTML page and
-the console list devices that are new, gone, or have moved to a different switch port
-since the previous run. New devices are outlined in green on the diagram.
+Each run keeps timestamped copies in `runs/`, and the `*-latest` files are the newest. The
+HTML page and the console list devices that are new, gone, or have moved to a different
+switch port since the previous run. New devices are outlined in green on the diagram.
+
+To map the network on its own, register it with Windows Task Scheduler:
+
+```powershell
+.\netmapper.exe schedule                          # every day at 08:00
+.\netmapper.exe schedule --at 09:00 --every-hours 2 --weekdays   # 09:00 to midnight, Mon-Fri
+.\netmapper.exe schedule --status                 # when it last ran, and the result
+.\netmapper.exe schedule --run-now                # try it straight away
+.\netmapper.exe schedule --remove
+```
+
+Running `schedule` again replaces the task. It runs with the config you pass (`-c`, default
+`config.toml` in the current folder) and writes its output to `runs/netmapper.log`. Runs
+during working hours give the fullest picture, because idle devices drop out of the
+switches' MAC tables. A run is skipped if the network is down or the previous one hasn't
+finished.
+
+The task runs as you, while you're logged on. A console window flashes up briefly and
+hides itself. `--background` runs it whether or not anyone is logged on, with no window at
+all, but then Windows notifications can't be shown, and creating it may need an
+administrator terminal.
+
+When a run finds a new device, netmapper can tell you. Alerts are all off by default;
+turn on the ones you want in `[alerts]` (see [`config.example.toml`](config.example.toml)):
+
+- **Windows notification** on this PC (`desktop = true`).
+- **Email** through your mail server.
+- **Webhook** to Teams, Slack, Discord, or anything that accepts JSON.
+
+`on = ["new", "gone", "moved"]` alerts on the other changes too. `netmapper test-alert`
+sends a sample through every configured channel. Email and webhooks are the only things
+netmapper sends off the network, and only when you configure them. Secrets written as
+`env:NAME` must be set permanently for the scheduled task to see them, for example
+`setx NETMAPPER_WEBHOOK "https://..."` (then open a new terminal).
 
 ## Run from source
 

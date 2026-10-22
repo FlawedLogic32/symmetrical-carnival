@@ -5,6 +5,8 @@
     netmapper discover --open         collect data, build the topology, draw the diagram
     netmapper topology [RUN.json]     rebuild topology and diagram from a saved run
     netmapper update-oui              download the MAC vendor list (needs internet)
+    netmapper schedule --at 08:00     map the network every day with Task Scheduler
+    netmapper test-alert              send a sample alert through each configured channel
 
 Run with no arguments (for example by double-clicking netmapper.exe) to create the
 config if needed, map the network and open the diagram.
@@ -16,12 +18,16 @@ import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
 import tomllib
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__
+from . import alerts as alerting
+from . import schedule as scheduling
 from .config import Config, ConfigError, load_config
 from .diagram import assign_groups, compute_layout, to_drawio, to_html, to_vsdx
 from .diff import diff_topologies
@@ -51,8 +57,9 @@ def _write(directory: Path, name: str, latest: str, data: str | bytes) -> Path:
 
 
 def build_outputs(cfg: Config, run: DiscoveryRun, source: Path, show: bool = False,
-                  open_html: bool = False) -> Path:
-    """Topology, diff against the previous one, then the draw.io, Visio and HTML diagrams."""
+                  open_html: bool = False, alert: bool = False) -> Path:
+    """Topology, diff against the previous one, then the draw.io, Visio and HTML diagrams.
+    With ``alert``, also sends the configured alerts if anything changed."""
     previous = _previous_topology(cfg)
     vendors = VendorLookup.load_if_present(cfg.oui_file)
     topo = build_topology(run, vendors, resolve=lookup_names if cfg.resolve_names else None,
@@ -94,12 +101,28 @@ def build_outputs(cfg: Config, run: DiscoveryRun, source: Path, show: bool = Fal
     if show and topo.nodes:
         print()
         print(render_tree(topo))
+    if alert:
+        _send_alerts(cfg, alerting.build_alert(diff, cfg.alerts.on, html.resolve()))
     if open_html and not os.environ.get("NETMAPPER_NO_BROWSER"):
         webbrowser.open(html.resolve().as_uri())
     return html
 
 
-def _discover(cfg: Config, ping_sweep=False, no_snmp=False, show=False, open_html=False) -> int:
+def _send_alerts(cfg: Config, alert: alerting.Alert | None) -> bool:
+    if alert is None:
+        return True
+    names = alerting.channels(cfg.alerts)
+    if not names:
+        return True
+    ok = True
+    for name, error in alerting.send_alert(alert, cfg.alerts).items():
+        print(f"Alert ({name}): {'sent' if error is None else 'failed: ' + error}")
+        ok = ok and error is None
+    return ok
+
+
+def _discover(cfg: Config, ping_sweep=False, no_snmp=False, show=False, open_html=False,
+              alert=True) -> int:
     if ping_sweep:
         cfg.ping_sweep = True
     if no_snmp:
@@ -110,8 +133,89 @@ def _discover(cfg: Config, ping_sweep=False, no_snmp=False, show=False, open_htm
     for note in run.notes:
         print(f"  note: {note}")
     print(f"Raw data: {path}")
-    build_outputs(cfg, run, path, show, open_html)
+    build_outputs(cfg, run, path, show, open_html, alert=alert)
     return 0
+
+
+def _log_to_file(cfg: Config) -> None:
+    """A scheduled run has no one watching the console, so keep its output in a log."""
+    cfg.output_directory.mkdir(parents=True, exist_ok=True)
+    log = open(cfg.output_directory / "netmapper.log", "a", encoding="utf-8", buffering=1)
+    console = sys.stderr
+    sys.stdout = sys.stderr = log
+    root = logging.getLogger()
+    for handler in root.handlers:
+        # Only the console handler basicConfig made, not handlers someone else added.
+        if type(handler) is logging.StreamHandler and handler.stream is console:
+            handler.setStream(log)
+    print(f"\n=== scheduled run {datetime.now().isoformat(timespec='seconds')} ===")
+
+
+def _schedule(cfg: Config, args) -> int:
+    config = Path(args.config)
+    if args.remove or args.status or args.run_now:
+        action = (scheduling.remove if args.remove else
+                  scheduling.status if args.status else scheduling.run_now)
+        if not scheduling.IS_WINDOWS:
+            print("Task Scheduler is only on Windows.", file=sys.stderr)
+            return 1
+        try:
+            print(action(args.name))
+        except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+            print(f"schtasks failed: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
+    try:
+        plan = scheduling.Schedule(at=scheduling.parse_time(args.at),
+                                   every_hours=args.every_hours,
+                                   weekdays_only=args.weekdays, background=args.background)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    if args.every_hours is not None and not 1 <= args.every_hours <= 23:
+        print("--every-hours must be between 1 and 23", file=sys.stderr)
+        return 2
+    if args.print_xml:
+        print(scheduling.task_xml(plan, config))
+        return 0
+    if not scheduling.IS_WINDOWS:
+        print("Task Scheduler is only on Windows. The cron equivalent is:")
+        print(f"  {scheduling.cron_line(plan, config)}")
+        return 1
+    try:
+        print(scheduling.install(plan, config, args.name))
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
+        print(f"could not create the scheduled task: {exc}", file=sys.stderr)
+        if plan.background:
+            print("Running in the background (--background) may need an administrator "
+                  "terminal.", file=sys.stderr)
+        return 1
+    print(f"Scheduled task '{args.name}' maps the network {plan.describe()}.")
+    print(f"Output and a log (netmapper.log) go to {cfg.output_directory.resolve()}")
+    names = alerting.channels(cfg.alerts)
+    if plan.background and "desktop" in names:
+        names.remove("desktop")
+        print("Background runs can't show Windows notifications; use email or a webhook.")
+    if names:
+        print(f"Alerts on {', '.join(sorted(cfg.alerts.on))} devices go to: {', '.join(names)}")
+    else:
+        print("No alerts are configured; add an [alerts] section to the config for them.")
+    print("Secrets read with env:NAME must be set permanently (setx NAME value) for the task "
+          "to see them.")
+    return 0
+
+
+def _test_alert(cfg: Config) -> int:
+    names = alerting.channels(cfg.alerts)
+    if not names:
+        print("No alert channels are configured. See [alerts] in config.example.toml.")
+        return 1
+    alert = alerting.Alert(
+        title="netmapper: test alert",
+        lines=["This is a test. Real alerts list new, gone or moved devices here."],
+        diagram=(cfg.output_directory / "network-latest.html").resolve())
+    return 0 if _send_alerts(cfg, alert) else 1
 
 
 def _load(path: str) -> Config | None:
@@ -211,6 +315,9 @@ def main(argv: list[str] | None = None) -> int:
     disc.add_argument("--no-snmp", action="store_true", help="skip SNMP and use the ARP cache only")
     disc.add_argument("--show", action="store_true", help="print the topology as an outline")
     disc.add_argument("--open", action="store_true", help="open the diagram in the browser")
+    disc.add_argument("--no-alerts", action="store_true", help="don't send alerts for this run")
+    disc.add_argument("--scheduled", action="store_true",
+                      help="used by the scheduled task: no window, output goes to netmapper.log")
 
     topo = with_config(sub.add_parser("topology",
                                       help="rebuild topology and diagram from a saved run"))
@@ -219,6 +326,28 @@ def main(argv: list[str] | None = None) -> int:
     topo.add_argument("--open", action="store_true", help="open the diagram in the browser")
 
     with_config(sub.add_parser("update-oui", help="download the IEEE MAC vendor list"))
+
+    sched = with_config(sub.add_parser(
+        "schedule", help="run discovery on a schedule with Windows Task Scheduler",
+        description="Create (or replace) a Task Scheduler task that runs "
+                    "'netmapper discover' with this config. Run it again to change the time."))
+    sched.add_argument("--at", default="08:00", help="time of day, HH:MM (default 08:00)")
+    sched.add_argument("--every-hours", type=int, metavar="N",
+                       help="repeat every N hours from --at until midnight")
+    sched.add_argument("--weekdays", action="store_true", help="Monday to Friday only")
+    sched.add_argument("--background", action="store_true",
+                       help="run even when nobody is logged on, with no window "
+                            "(no desktop notifications; may need an admin terminal)")
+    sched.add_argument("--name", default=scheduling.DEFAULT_TASK, help="task name")
+    sched.add_argument("--print-xml", action="store_true",
+                       help="print the task definition instead of creating it")
+    what = sched.add_mutually_exclusive_group()
+    what.add_argument("--remove", action="store_true", help="delete the scheduled task")
+    what.add_argument("--status", action="store_true", help="show the task and its last result")
+    what.add_argument("--run-now", action="store_true", help="start the scheduled task now")
+
+    with_config(sub.add_parser("test-alert",
+                               help="send a sample alert through each configured channel"))
 
     args = parser.parse_args(argv)
 
@@ -233,9 +362,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "snmp-setup":
         return _snmp_setup(Path(args.config))
 
-    cfg = _load(args.config)
-    if cfg is None:
+    scheduled = args.command == "discover" and args.scheduled
+    if scheduled:
+        scheduling.hide_own_console()
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        if scheduled:  # nobody sees stderr, so leave the reason next to the config
+            with open(Path(args.config).parent / "netmapper.log", "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now().isoformat(timespec='seconds')} config error: {exc}\n")
         return 2
+    if scheduled:
+        _log_to_file(cfg)
 
     if args.command == "update-oui":
         try:
@@ -254,7 +393,20 @@ def main(argv: list[str] | None = None) -> int:
         build_outputs(cfg, load_run(source), source, args.show, args.open)
         return 0
 
-    return _discover(cfg, args.ping_sweep, args.no_snmp, args.show, args.open)
+    if args.command == "schedule":
+        return _schedule(cfg, args)
+
+    if args.command == "test-alert":
+        return _test_alert(cfg)
+
+    try:
+        return _discover(cfg, args.ping_sweep, args.no_snmp, args.show,
+                         args.open and not scheduled, alert=not args.no_alerts)
+    except Exception:
+        if not scheduled:
+            raise
+        logging.exception("the scheduled run failed")
+        return 1
 
 
 if __name__ == "__main__":

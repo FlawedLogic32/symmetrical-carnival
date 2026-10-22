@@ -2,10 +2,10 @@
 
     python packaging/smoke_test.py dist/netmapper.exe
 
-Checks: --version, init, an ARP-only run on this machine, that snmp-setup exits cleanly
-with no one at the keyboard, double-click mode, and (if snmpsim is installed) full runs
-against a simulated switch over real SNMPv2c and SNMPv3 (with a DPAPI-encrypted secret
-on Windows).
+Checks: --version, init, an ARP-only run on this machine, a scheduled-style run, creating
+and removing a Task Scheduler task (on Windows), that snmp-setup exits cleanly with no one
+at the keyboard, double-click mode, and (if snmpsim is installed) full runs against a
+simulated switch over real SNMPv2c and SNMPv3 (with a DPAPI-encrypted secret on Windows).
 """
 
 import os
@@ -75,6 +75,19 @@ def main(exe: Path) -> None:
     for name in ("latest.json", "topology-latest.json", "network-latest.html",
                  "network-latest.drawio", "network-latest.vsdx"):
         expect(work / "runs" / name)
+
+    # A scheduled-style run logs to a file instead of the console.
+    run(exe, "discover", "--scheduled", "--no-alerts", cwd=work)
+    expect(work / "runs" / "netmapper.log", "scheduled run")
+    if os.name == "nt":
+        # Check Task Scheduler accepts the task definition, then clean up.
+        name = "netmapper-smoke-test"
+        try:
+            run(exe, "schedule", "--name", name, "--at", "08:00", "--every-hours", "2",
+                "--weekdays", cwd=work)
+            print(run(exe, "schedule", "--name", name, "--status", cwd=work).stdout)
+        finally:
+            run(exe, "schedule", "--name", name, "--remove", cwd=work, check=False)
 
     # With no one at the keyboard the wizard must stop cleanly, not hang or crash.
     out = run(exe, "snmp-setup", cwd=work, check=False).stdout
