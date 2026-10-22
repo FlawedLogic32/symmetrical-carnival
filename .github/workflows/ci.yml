@@ -52,7 +52,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force netmapper-windows | Out-Null
           Copy-Item dist/netmapper.exe, README.md, config.example.toml, LICENSE netmapper-windows/
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: netmapper-windows
           path: netmapper-windows/
@@ -65,7 +65,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: netmapper-windows
           path: netmapper-windows
