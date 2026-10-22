@@ -17,10 +17,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-24.04]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install
@@ -35,8 +35,8 @@ jobs:
     needs: test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install
@@ -52,7 +52,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force netmapper-windows | Out-Null
           Copy-Item dist/netmapper.exe, README.md, config.example.toml, LICENSE netmapper-windows/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: netmapper-windows
           path: netmapper-windows/
@@ -61,11 +61,11 @@ jobs:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: windows-exe
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with:
           name: netmapper-windows
           path: netmapper-windows
