@@ -41,10 +41,13 @@ class Config:
     snmp_credentials: list[SnmpCredential] = field(default_factory=list)
     snmp_timeout_seconds: float = 2.0
     snmp_retries: int = 1
+    snmp_port: int = 161
     crawl_neighbors: bool = True
     probe_discovered_hosts: bool = False
     max_devices: int = 200
     output_directory: Path = Path("runs")
+    resolve_names: bool = False
+    oui_file: Path = Path("oui.csv")
 
 
 def _secret(value: str | None) -> str | None:
@@ -93,6 +96,7 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
     disc = raw.get("discovery", {})
     snmp = raw.get("snmp", {})
     out = raw.get("output", {})
+    topo = raw.get("topology", {})
 
     try:
         subnets = [ipaddress.IPv4Network(s, strict=False) for s in disc.get("subnets", [])]
@@ -102,6 +106,9 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
     output_dir = Path(out.get("directory", "runs"))
     if not output_dir.is_absolute():
         output_dir = base_dir / output_dir
+    oui_file = Path(topo.get("oui_file", "oui.csv"))
+    if not oui_file.is_absolute():
+        oui_file = base_dir / oui_file
 
     return Config(
         subnets=subnets,
@@ -113,8 +120,11 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
         snmp_credentials=[_credential(c) for c in snmp.get("credentials", [])],
         snmp_timeout_seconds=float(snmp.get("timeout_seconds", 2.0)),
         snmp_retries=int(snmp.get("retries", 1)),
+        snmp_port=int(snmp.get("port", 161)),
         crawl_neighbors=bool(snmp.get("crawl_neighbors", True)),
         probe_discovered_hosts=bool(snmp.get("probe_discovered_hosts", False)),
         max_devices=int(snmp.get("max_devices", 200)),
         output_directory=output_dir,
+        resolve_names=bool(topo.get("resolve_names", False)),
+        oui_file=oui_file,
     )

@@ -27,7 +27,8 @@ def _default_factory(cfg: Config) -> ClientFactory:
     from .collectors.snmp_client import PySnmpClient
 
     def make(ip, cred):
-        return PySnmpClient(ip, cred, timeout=cfg.snmp_timeout_seconds, retries=cfg.snmp_retries)
+        return PySnmpClient(ip, cred, timeout=cfg.snmp_timeout_seconds, retries=cfg.snmp_retries,
+                            port=cfg.snmp_port)
 
     return make
 
@@ -125,12 +126,30 @@ def _crawl(cfg: Config, seeds: list[str], factory: ClientFactory, run: Discovery
     return devices
 
 
+def _stamp(iso_time: str) -> str:
+    return iso_time.replace(":", "").replace("+0000", "Z").replace("-", "")
+
+
+def _write(directory: Path, name: str, latest: str, data: dict) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    text = json.dumps(data, indent=2)
+    path.write_text(text, encoding="utf-8")
+    (directory / latest).write_text(text, encoding="utf-8")
+    return path
+
+
 def save_run(run: DiscoveryRun, directory: Path) -> Path:
     """Write the run as runs/discovery-<timestamp>.json and update runs/latest.json."""
-    directory.mkdir(parents=True, exist_ok=True)
-    stamp = run.started_at.replace(":", "").replace("+0000", "Z").replace("-", "")
-    path = directory / f"discovery-{stamp}.json"
-    text = json.dumps(run.to_dict(), indent=2)
-    path.write_text(text, encoding="utf-8")
-    (directory / "latest.json").write_text(text, encoding="utf-8")
-    return path
+    return _write(directory, f"discovery-{_stamp(run.started_at)}.json", "latest.json",
+                  run.to_dict())
+
+
+def load_run(path: Path) -> DiscoveryRun:
+    return DiscoveryRun.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
+
+
+def save_topology(topo, directory: Path, stamp_from: str) -> Path:
+    """Write runs/topology-<timestamp>.json (matching its discovery run) and topology-latest.json."""
+    return _write(directory, f"topology-{_stamp(stamp_from)}.json", "topology-latest.json",
+                  topo.to_dict())

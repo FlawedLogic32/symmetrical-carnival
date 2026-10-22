@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[dev]" snmpsim pysmi
+      - name: Run tests
+        run: pytest -v
+
+  windows-exe:
+    name: Build netmapper.exe
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[build]" snmpsim pysmi
+      - name: Build
+        run: python packaging/build_exe.py
+      - name: Smoke test the .exe on Windows
+        run: python packaging/smoke_test.py dist/netmapper.exe
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force netmapper-windows | Out-Null
+          Copy-Item dist/netmapper.exe, README.md, config.example.toml, LICENSE netmapper-windows/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: netmapper-windows
+          path: netmapper-windows/
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows-exe
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: netmapper-windows
+          path: netmapper-windows
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd netmapper-windows && zip -r ../netmapper-windows.zip . && cd ..
+          gh release create "$GITHUB_REF_NAME" netmapper-windows.zip netmapper-windows/netmapper.exe \
+            --repo "$GITHUB_REPOSITORY" --title "netmapper $GITHUB_REF_NAME" --generate-notes

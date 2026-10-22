@@ -27,3 +27,17 @@ class FakeSnmp:
 
     def close(self):
         self.closed = True
+
+
+def snmprec(data: dict) -> str:
+    """Format {oid: value} as an snmpsim .snmprec file."""
+    rows = []
+    for oid, value in data.items():
+        if isinstance(value, bytes):
+            rows.append((oid, "4x", value.hex()))
+        elif isinstance(value, int):
+            rows.append((oid, "2", str(value)))
+        else:
+            rows.append((oid, "6", value))
+    rows.sort(key=lambda r: tuple(int(p) for p in r[0].split(".")))
+    return "".join(f"{o}|{t}|{v}\n" for o, t, v in rows)

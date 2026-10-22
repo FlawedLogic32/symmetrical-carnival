@@ -22,6 +22,8 @@ seeds = ["192.168.1.1", "192.168.1.2"]
 crawl_neighbors = true
 max_devices = 200
 timeout_seconds = 2
+# Only change this for devices that answer SNMP on a non-standard port.
+port = 161
 retries = 1
 
 # Off by default. When on, also tries SNMP on every host found in the ARP cache.
@@ -42,6 +44,14 @@ community = "env:SNMP_COMMUNITY"
 # priv_protocol = "aes"        # des, aes, aes256
 # priv_key = "env:SNMP_PRIV"
 
+[topology]
+# Look up hostnames with reverse DNS through your normal DNS server. It's off by
+# default because it sends one DNS query per host; turn it on for nicer labels.
+resolve_names = false
+# MAC vendor list. Run "netmapper update-oui" once to download it from the IEEE.
+oui_file = "oui.csv"
+
 [output]
-# Each run is saved as discovery-<time>.json, and latest.json is the newest.
+# Each run saves discovery-, topology- and network-<time> files (JSON, .html, .drawio),
+# plus *-latest copies of the newest. Relative paths are relative to this file.
 directory = "runs"

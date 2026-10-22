@@ -1,9 +1,10 @@
-__pycache__/
-*.pyc
 *.egg-info/
+*.pyc
 .venv/
-venv/
+__pycache__/
 build/
-dist/
-runs/
 config.toml
+dist/
+oui.csv
+runs/
+venv/
