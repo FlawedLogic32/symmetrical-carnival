@@ -64,11 +64,17 @@ finds. It's off by default because an SNMP sweep is exactly what IDS rules look 
 4. **Unmanaged switches** can't be asked anything, so they're inferred: an edge port with
    several endpoint MACs behind it gets an "unmanaged switch" node. Hosts behind a phone,
    an access point or a switch that couldn't be queried are attached to that device instead.
-5. Hosts seen only in an ARP cache, with no switch port, go under "Location unknown".
+5. **VM hosts** look like unmanaged switches too (several MACs on one port), so the MACs
+   are checked against the ranges hypervisors use (VMware, Hyper-V, Xen, VirtualBox,
+   QEMU/KVM, Proxmox, Parallels). If all of them, or all but one, are virtual, the port
+   gets a "VM host" with the VMs under it instead of an unmanaged switch.
+6. Hosts seen only in an ARP cache, with no switch port, go under "Location unknown".
 
 Inferred links are dashed on the diagram. Some limits:
 
-- A server running several VMs on one port also looks like an unmanaged switch.
+- A VM host is only recognised if its VMs use their hypervisor's default MAC range. VMs
+  given custom MACs, or VMs mixed with other physical devices behind a real unmanaged
+  switch, still show as an unmanaged switch.
 - With no managed switches, or no SNMP credentials, all it can show is which devices exist,
   not how they're cabled.
 - Devices that haven't sent traffic recently may have aged out of the switches' MAC tables.

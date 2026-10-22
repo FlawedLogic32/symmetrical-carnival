@@ -15,6 +15,29 @@ log = logging.getLogger(__name__)
 
 IEEE_OUI_URL = "https://standards-oui.ieee.org/oui/oui.csv"
 
+# MAC prefixes that hypervisors hand out to virtual NICs. Built in, so VMs are
+# recognised even without the IEEE list (and 52:54:00 isn't in it at all).
+VIRTUAL_NIC_PREFIXES = {
+    "005056": "VMware",
+    "000c29": "VMware",
+    "000569": "VMware",
+    "001c14": "VMware",
+    "00155d": "Microsoft Hyper-V",
+    "0003ff": "Microsoft Virtual PC",
+    "00163e": "Xen",
+    "080027": "VirtualBox",
+    "525400": "QEMU/KVM",
+    "bc2411": "Proxmox",
+    "001c42": "Parallels",
+}
+
+
+def virtual_nic_platform(mac: str | None) -> str | None:
+    """The hypervisor whose MAC range ``mac`` comes from, or None for a physical NIC."""
+    if not mac:
+        return None
+    return VIRTUAL_NIC_PREFIXES.get(mac.replace(":", "")[:6])
+
 
 class VendorLookup:
     def __init__(self, table: dict[str, str] | None = None):
@@ -46,6 +69,9 @@ class VendorLookup:
     def vendor(self, mac: str | None) -> str | None:
         if not mac:
             return None
+        platform = virtual_nic_platform(mac)
+        if platform:
+            return f"{platform} virtual NIC"
         if int(mac[:2], 16) & 0x02:
             # Locally administered: phones and laptops randomise their MAC for privacy.
             return "Private (randomised) MAC"
