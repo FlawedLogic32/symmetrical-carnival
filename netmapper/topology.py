@@ -366,7 +366,10 @@ def build_topology(run: DiscoveryRun, vendors: VendorLookup | None = None,
                    source: str | None = None) -> Topology:
     """Build the topology. ``resolve``, if given, maps IPs to names (e.g. lookup_names)."""
     ips = {h.ip for h in run.hosts if h.ip} | {a.ip for d in run.devices for a in d.arp}
-    names = resolve(ips) if resolve else {}
+    # Names devices gave themselves (DHCP, mDNS), then reverse DNS on top if asked for.
+    names = {h.ip: h.name for h in run.hosts if h.ip and h.name}
+    if resolve:
+        names.update(resolve(ips))
     b = _Builder(run, vendors or VendorLookup(), names)
     b.add_managed_devices()
     b.add_neighbor_links()

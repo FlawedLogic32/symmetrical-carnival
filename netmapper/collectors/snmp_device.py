@@ -6,7 +6,9 @@ monitoring system makes:
 * SNMPv2-MIB / IF-MIB: name, description, interface names
 * LLDP-MIB and CISCO-CDP-MIB: which devices are plugged into which port
 * BRIDGE-MIB / Q-BRIDGE-MIB: the MAC addresses learned on each port
-* IP-MIB: the device's ARP table (MAC to IP), mainly from routers and L3 switches
+* IP-MIB: the device's ARP table (MAC to IP), mainly from routers and L3 switches.
+  The older ipNetToMediaTable is read first; newer devices that only fill in
+  ipNetToPhysicalTable are read from that instead.
 """
 
 from __future__ import annotations
@@ -38,6 +40,7 @@ DOT1Q_FDB_STATUS = "1.3.6.1.2.1.17.7.1.2.2.1.3"
 FDB_STATUS_SELF = 4  # the switch's own MAC, not a connected device
 
 IP_NET_TO_MEDIA_PHYS = "1.3.6.1.2.1.4.22.1.2"
+IP_NET_TO_PHYSICAL_PHYS = "1.3.6.1.2.1.4.35.1.4"
 
 LLDP_LOC_CHASSIS_ID = "1.0.8802.1.1.2.1.3.2.0"
 LLDP_LOC_PORT_ID = "1.0.8802.1.1.2.1.3.7.1.3"
@@ -191,6 +194,15 @@ def collect_arp(snmp: Snmp, device: SnmpDevice) -> None:
         mac = normalize_mac(value)
         if is_unicast_mac(mac):
             device.arp.append(ArpEntry(ip=".".join(map(str, idx[1:])), mac=mac, if_index=idx[0]))
+    if device.arp:
+        return
+    # Index is (ifIndex, addressType, addressLength, address bytes...). IPv4 only.
+    for idx, value in _safe_walk(snmp, IP_NET_TO_PHYSICAL_PHYS, device):
+        if len(idx) != 7 or idx[1] != 1 or idx[2] != 4:
+            continue
+        mac = normalize_mac(value)
+        if is_unicast_mac(mac):
+            device.arp.append(ArpEntry(ip=".".join(map(str, idx[3:])), mac=mac, if_index=idx[0]))
 
 
 def collect_device(snmp: Snmp, ip: str) -> SnmpDevice:

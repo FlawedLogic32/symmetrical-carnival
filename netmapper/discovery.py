@@ -6,13 +6,15 @@ import json
 import logging
 import socket
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import __version__
-from .collectors import local
+from .collectors import dhcp, listen, local
 from .collectors.snmp_device import ClientFactory, collect_device, connect
 from .config import Config
+from .init import local_ipv4
 from .models import DiscoveryRun, Host
 from .util import ip_in_networks
 
@@ -34,25 +36,64 @@ def _default_factory(cfg: Config) -> ClientFactory:
 
 
 def merge_hosts(*groups: list[Host]) -> list[Host]:
-    """Combine host sightings, keyed by MAC (or IP when no MAC is known)."""
+    """Combine host sightings, keyed by MAC (or IP when no MAC is known).
+
+    A sighting with only an IP (heard on the network, say) is folded into the host
+    with that IP and a MAC, when there is one.
+    """
     merged: dict[str, Host] = {}
+
+    def fold(into: Host, h: Host) -> None:
+        into.ip = into.ip or h.ip
+        into.name = into.name or h.name
+        for src in h.sources:
+            if src not in into.sources:
+                into.sources.append(src)
+
     for group in groups:
         for h in group:
             key = h.mac or f"ip:{h.ip}"
             existing = merged.get(key)
             if existing is None:
-                merged[key] = Host(ip=h.ip, mac=h.mac, sources=list(h.sources))
-                continue
-            existing.ip = existing.ip or h.ip
-            for src in h.sources:
-                if src not in existing.sources:
-                    existing.sources.append(src)
+                merged[key] = Host(ip=h.ip, mac=h.mac, sources=list(h.sources), name=h.name)
+            else:
+                fold(existing, h)
+    by_ip = {h.ip: h for h in merged.values() if h.mac and h.ip}
+    for key in [k for k in merged if k.startswith("ip:")]:
+        if owner := by_ip.get(merged[key].ip):
+            fold(owner, merged.pop(key))
     return sorted(merged.values(), key=lambda h: (h.ip is None, h.ip or "", h.mac or ""))
+
+
+def _in_scope(hosts: list[Host], cfg: Config) -> list[Host]:
+    """Hosts inside the configured subnets. MAC-only sightings are kept."""
+    if not cfg.subnets:
+        return hosts
+    return [h for h in hosts if h.ip is None or ip_in_networks(h.ip, cfg.subnets)]
+
+
+def _dhcp_leases(cfg: Config, run: DiscoveryRun) -> list[Host]:
+    hosts: list[Host] = []
+    for path in cfg.dhcp_lease_files:
+        if not path.exists():
+            run.notes.append(f"DHCP lease file not found: {path}")
+            continue
+        hosts += dhcp.read_lease_file(path)
+    for server in cfg.windows_dhcp_servers:
+        leases, error = dhcp.read_windows_dhcp(server)
+        if error:
+            run.notes.append(error)
+        hosts += leases
+    return hosts
 
 
 def run_discovery(cfg: Config, snmp_factory: ClientFactory | None = None) -> DiscoveryRun:
     run = DiscoveryRun(started_at=_now(), tool_version=__version__,
                        collector_host=socket.gethostname())
+
+    # Listening runs in the background while everything else is collected.
+    pool = ThreadPoolExecutor(max_workers=1) if cfg.listen_seconds > 0 else None
+    heard = pool.submit(listen.listen, cfg.listen_seconds, local_ipv4()) if pool else None
 
     if cfg.ping_sweep:
         if cfg.subnets:
@@ -78,7 +119,16 @@ def run_discovery(cfg: Config, snmp_factory: ClientFactory | None = None) -> Dis
     elif cfg.snmp_enabled:
         run.notes.append("SNMP skipped: no credentials configured")
 
-    run.hosts = merge_hosts(arp_hosts, snmp_hosts)
+    dhcp_hosts = _in_scope(_dhcp_leases(cfg, run), cfg)
+    heard_hosts: list[Host] = []
+    if heard is not None:
+        heard_hosts = _in_scope(heard.result(), cfg)
+        pool.shutdown()
+        if not heard_hosts:
+            run.notes.append("passive listening heard nothing; Windows Firewall may be blocking "
+                             "netmapper from receiving (allow it on private networks)")
+
+    run.hosts = merge_hosts(arp_hosts, snmp_hosts, dhcp_hosts, heard_hosts)
     run.finished_at = _now()
     return run
 

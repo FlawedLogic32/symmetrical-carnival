@@ -1,6 +1,7 @@
 """netmapper: map a network quietly and draw it.
 
     netmapper init                    create config.toml for the network this PC is on
+    netmapper snmp-setup              add SNMP (v3 or v2c) credentials, step by step
     netmapper discover --open         collect data, build the topology, draw the diagram
     netmapper topology [RUN.json]     rebuild topology and diagram from a saved run
     netmapper update-oui              download the MAC vendor list (needs internet)
@@ -16,6 +17,7 @@ import json
 import logging
 import os
 import sys
+import tomllib
 import webbrowser
 from pathlib import Path
 
@@ -27,6 +29,7 @@ from .discovery import _stamp, load_run, run_discovery, save_run, save_topology
 from .init import write_starter_config
 from .models import DiscoveryRun
 from .oui import VendorLookup, download_oui
+from .snmp_setup import run_setup
 from .topology import Topology, build_topology, lookup_names, render_tree
 
 
@@ -109,12 +112,41 @@ def _load(path: str) -> Config | None:
         return None
 
 
+def _snmp_setup(path: Path) -> int:
+    """Run the credential wizard. Reads the raw file, so it works even when the
+    current config can't load yet (for example an env: secret that isn't set)."""
+    from .collectors.snmp_client import PySnmpClient
+
+    try:
+        snmp = tomllib.loads(path.read_text(encoding="utf-8")).get("snmp", {})
+    except (OSError, tomllib.TOMLDecodeError):
+        snmp = {}
+
+    def factory(ip, cred):
+        return PySnmpClient(ip, cred, timeout=float(snmp.get("timeout_seconds", 2.0)),
+                            retries=int(snmp.get("retries", 1)), port=int(snmp.get("port", 161)))
+
+    return run_setup(path, factory, seeds=[str(s) for s in snmp.get("seeds", [])])
+
+
+def _interactive() -> bool:
+    return bool(sys.stdin and sys.stdin.isatty())
+
+
 def _double_click() -> int:
     """No arguments: set up if needed, map the network, open the diagram."""
     config = Path("config.toml")
     if not config.exists():
         print(write_starter_config(config))
         print()
+        if _interactive():
+            answer = input("Do you have SNMP login details for your managed switches? "
+                           "Set them up now? [y/N]: ").strip().lower()
+            if answer.startswith("y"):
+                _snmp_setup(config)
+            else:
+                print("OK. You can add them later with 'netmapper snmp-setup'.")
+            print()
     cfg = _load(str(config))
     if cfg is None:
         return 2
@@ -123,7 +155,7 @@ def _double_click() -> int:
 
 def _pause_if_double_clicked() -> None:
     # A console window opened by double-clicking closes as soon as we exit.
-    if getattr(sys, "frozen", False) and sys.stdin and sys.stdin.isatty():
+    if getattr(sys, "frozen", False) and _interactive():
         try:
             input("\nPress Enter to close.")
         except EOFError:
@@ -157,6 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     init = sub.add_parser("init", help="create a starter config.toml for this network")
     init.add_argument("-c", "--config", default="config.toml", help="where to write it")
 
+    with_config(sub.add_parser("snmp-setup",
+                               help="add SNMP credentials step by step, test and save them"))
+
     disc = with_config(sub.add_parser("discover", help="map the network and draw the diagram"))
     disc.add_argument("--ping-sweep", action="store_true",
                       help="also run the slow ping sweep, even if the config turns it off")
@@ -181,6 +216,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{exc}; not overwriting it", file=sys.stderr)
             return 1
         return 0
+
+    if args.command == "snmp-setup":
+        return _snmp_setup(Path(args.config))
 
     cfg = _load(args.config)
     if cfg is None:

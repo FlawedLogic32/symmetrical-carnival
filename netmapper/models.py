@@ -16,6 +16,8 @@ class Host:
     ip: str | None
     mac: str | None
     sources: list[str] = field(default_factory=list)
+    # A name the device gave itself, from a DHCP lease or an mDNS announcement.
+    name: str | None = None
 
 
 @dataclass
