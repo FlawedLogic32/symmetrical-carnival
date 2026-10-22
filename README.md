@@ -12,7 +12,10 @@ Each run produces:
 - **`network-latest.html`**: the diagram, a list of what changed since the last run, and a
   searchable table of every device. It's a single self-contained file that works offline.
 - **`network-latest.drawio`**: the same diagram, editable in [draw.io](https://www.drawio.com/)
-  (desktop or browser). draw.io can also export it to Visio, PDF or PNG.
+  (desktop or browser). draw.io can also export it to PDF or PNG.
+- **`network-latest.vsdx`**: the same diagram for Microsoft Visio. Links are glued to the
+  devices, so they follow when you move things around, and each device's IP, MAC and
+  vendor are in its Shape Data.
 - JSON files with the raw data and the topology, for scripting.
 
 ## Quick start on Windows (no Python needed)
@@ -100,6 +103,23 @@ community = "env:SNMP_COMMUNITY"          # read from an environment variable
 Set the secret before running, for example `$env:SNMP_COMMUNITY = "..."` in PowerShell.
 SNMPv3 (SHA/AES) is supported too. Several credential blocks can be listed, and each one
 is tried in turn.
+
+## Diagram
+
+Each device gets an icon for its type (router, switch, access point, phone, computer, and
+so on). To draw a frame round each site, floor or room, either turn on
+`group_by_snmp_location` to use the location already set on your switches, or list the
+groups yourself:
+
+```toml
+[[diagram.groups]]
+name = "First floor"
+members = ["ff-sw*", "192.168.20.0/24"]   # device names (wildcards), IPs or subnets
+```
+
+Devices you don't list join the group of the switch they plug into, so naming each floor's
+switches is usually enough. Groups only change how the diagram is drawn; rerun
+`netmapper topology` after editing them to redraw without touching the network.
 
 ## Re-running
 

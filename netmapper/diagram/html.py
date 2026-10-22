@@ -9,8 +9,9 @@ from html import escape
 
 from ..diff import TopologyDiff
 from ..topology import Topology
-from .layout import compute_layout
-from .style import KIND_COLORS, KIND_NAMES
+from . import icons
+from .layout import Layout, compute_layout
+from .style import ICON_COLORS, KIND_COLORS, KIND_NAMES
 from .svg import to_svg
 
 _CSS = """
@@ -48,7 +49,7 @@ padding:4px 12px;font:inherit;cursor:pointer}
 .canvas svg{display:block}
 .legend{display:flex;flex-wrap:wrap;gap:14px;margin-left:auto;font-size:12px;color:var(--muted)}
 .legend span{display:flex;align-items:center;gap:6px}
-.swatch{width:14px;height:10px;border-radius:3px;border:1.5px solid}
+.swatch{width:20px;height:20px;border-radius:5px;border:1.5px solid}
 input[type=search]{width:100%;max-width:360px;padding:8px 12px;border-radius:8px;
 border:1px solid var(--border);background:var(--bg);color:var(--text);font:inherit;margin-bottom:12px}
 .table-wrap{overflow-x:auto}
@@ -88,8 +89,8 @@ def _e(value) -> str:
 
 
 def to_html(topo: Topology, diff: TopologyDiff | None = None, first_run: bool = False,
-            title: str = "Network map") -> str:
-    layout = compute_layout(topo)
+            title: str = "Network map", layout: Layout | None = None) -> str:
+    layout = layout or compute_layout(topo)
     new_ids = {n.id for n in diff.added} if diff else set()
     svg = to_svg(topo, layout, new_ids)
 
@@ -121,7 +122,8 @@ def to_html(topo: Topology, diff: TopologyDiff | None = None, first_run: bool = 
     notes_html = f"<ul>{notes}</ul>" if notes else '<p class="muted">Nothing to flag.</p>'
 
     legend = "".join(
-        f'<span><span class="swatch" style="background:{f};border-color:{s}"></span>'
+        f'<span><svg class="swatch" viewBox="0 0 20 20" style="background:{f};border-color:{s}">'
+        f'{icons.svg_elements(k, 2, 2, 16, ICON_COLORS.get(k, s), 2)}</svg>'
         f'{_e(KIND_NAMES[k])}</span>' for k, (f, s) in KIND_COLORS.items() if k in counts)
     legend += '<span><svg width="26" height="6"><line x1="0" y1="3" x2="26" y2="3" ' \
               'stroke="#64748b" stroke-width="1.5" stroke-dasharray="5 4"/></svg>Inferred link</span>'
@@ -136,9 +138,11 @@ def to_html(topo: Topology, diff: TopologyDiff | None = None, first_run: bool = 
         else:
             where = ""
         mark = ' <span class="new">(new)</span>' if node_id in new_ids else ""
+        group = f"<td>{_e(box.group)}</td>" if layout.frames else ""
         rows.append(f"<tr><td>{_e(n.label)}{mark}</td><td>{_e(KIND_NAMES.get(n.kind, n.kind))}</td>"
                     f'<td class="mono">{_e(n.ip)}</td><td class="mono">{_e(n.mac)}</td>'
-                    f"<td>{_e(n.vendor)}</td><td>{_e(where)}</td></tr>")
+                    f"<td>{_e(n.vendor)}</td><td>{_e(where)}</td>{group}</tr>")
+    group_th = "<th>Group</th>" if layout.frames else ""
 
     links = len(topo.links)
     inferred = sum(1 for lk in topo.links if lk.inferred)
@@ -172,7 +176,8 @@ def to_html(topo: Topology, diff: TopologyDiff | None = None, first_run: bool = 
 <h2>Devices</h2>
 <input type="search" id="filter" placeholder="Filter by name, IP, MAC, vendor…">
 <div class="table-wrap"><table>
-<thead><tr><th>Name</th><th>Type</th><th>IP</th><th>MAC</th><th>Vendor</th><th>Connected to</th></tr></thead>
+<thead><tr><th>Name</th><th>Type</th><th>IP</th><th>MAC</th><th>Vendor</th><th>Connected to</th>
+{group_th}</tr></thead>
 <tbody>{''.join(rows)}</tbody>
 </table></div>
 </section>
