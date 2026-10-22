@@ -42,6 +42,14 @@ community = "env:SNMP_COMMUNITY"
 # priv_protocol = "aes"        # des, aes, aes256
 # priv_key = "env:SNMP_PRIV"
 
+[topology]
+# Look up hostnames with reverse DNS through your normal DNS server. It's off by
+# default because it sends one DNS query per host; turn it on for nicer labels.
+resolve_names = false
+# MAC vendor list. Run "netmapper update-oui" once to download it from the IEEE.
+oui_file = "oui.csv"
+
 [output]
-# Each run is saved as discovery-<time>.json, and latest.json is the newest.
+# Each run saves discovery-<time>.json and topology-<time>.json, plus
+# latest.json and topology-latest.json for the newest.
 directory = "runs"

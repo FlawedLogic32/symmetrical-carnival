@@ -84,3 +84,18 @@ class DiscoveryRun:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> DiscoveryRun:
+        devices = []
+        for d in raw.get("devices", []):
+            d = dict(d)
+            d["interfaces"] = [Interface(**i) for i in d.get("interfaces", [])]
+            d["neighbors"] = [Neighbor(**n) for n in d.get("neighbors", [])]
+            d["fdb"] = [FdbEntry(**f) for f in d.get("fdb", [])]
+            d["arp"] = [ArpEntry(**a) for a in d.get("arp", [])]
+            devices.append(SnmpDevice(**d))
+        run = dict(raw)
+        run["hosts"] = [Host(**h) for h in raw.get("hosts", [])]
+        run["devices"] = devices
+        return cls(**run)
