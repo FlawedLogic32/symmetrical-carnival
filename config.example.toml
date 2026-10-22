@@ -1,0 +1,47 @@
+# Copy this file to config.toml and edit it. config.toml is git-ignored.
+#
+# Anything secret can be written as "env:NAME" to read it from an environment
+# variable instead of keeping it in this file, for example community = "env:SNMP_COMMUNITY".
+
+[discovery]
+# The networks to map. Hosts outside these are ignored, and neighbour crawling
+# never leaves them.
+subnets = ["192.168.1.0/24"]
+
+# Off by default. When on, pings one address at a time with a pause between each,
+# so it doesn't look like a scan. A /24 at 0.5s takes about two minutes.
+ping_sweep = false
+ping_interval_seconds = 0.5
+ping_timeout_ms = 1000
+
+[snmp]
+enabled = true
+# Managed switches and routers to start from. The core switch and the router are a
+# good start; others are found through LLDP/CDP if crawl_neighbors is on.
+seeds = ["192.168.1.1", "192.168.1.2"]
+crawl_neighbors = true
+max_devices = 200
+timeout_seconds = 2
+retries = 1
+
+# Off by default. When on, also tries SNMP on every host found in the ARP cache.
+# This finds managed switches you didn't list, but an SNMP sweep is exactly the kind of
+# thing intrusion detection looks for, so leave it off where that matters.
+probe_discovered_hosts = false
+
+# Tried in order on each device until one works. Read-only access is all that's needed.
+[[snmp.credentials]]
+version = "2c"
+community = "env:SNMP_COMMUNITY"
+
+# [[snmp.credentials]]
+# version = "3"
+# username = "netmapper"
+# auth_protocol = "sha"        # md5, sha, sha256, sha512
+# auth_key = "env:SNMP_AUTH"
+# priv_protocol = "aes"        # des, aes, aes256
+# priv_key = "env:SNMP_PRIV"
+
+[output]
+# Each run is saved as discovery-<time>.json, and latest.json is the newest.
+directory = "runs"
