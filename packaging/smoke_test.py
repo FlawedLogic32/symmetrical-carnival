@@ -73,7 +73,7 @@ def main(exe: Path) -> None:
     print((work / "config.toml").read_text(encoding="utf-8"))
     run(exe, "discover", "--show", cwd=work)
     for name in ("latest.json", "topology-latest.json", "network-latest.html",
-                 "network-latest.drawio"):
+                 "network-latest.drawio", "network-latest.vsdx"):
         expect(work / "runs" / name)
 
     # With no one at the keyboard the wizard must stop cleanly, not hang or crash.

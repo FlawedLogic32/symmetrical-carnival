@@ -28,7 +28,8 @@ def test_discover_twice_writes_diagrams_and_reports_changes(tmp_path, capsys):
     config.write_text(
         '[discovery]\nsubnets = ["192.168.1.0/24"]\n'
         '[snmp]\nseeds = ["192.168.1.2"]\n'
-        '[[snmp.credentials]]\nversion = "2c"\ncommunity = "public"\n', encoding="utf-8")
+        '[[snmp.credentials]]\nversion = "2c"\ncommunity = "public"\n'
+        '[[diagram.groups]]\nname = "Server room"\nmembers = ["core-sw"]\n', encoding="utf-8")
     first = [Host("192.168.1.20", "a4:5e:60:01:01:01", ["arp-cache"])]
     second = first + [Host("192.168.1.77", "a4:5e:60:09:09:09", ["arp-cache"])]
 
@@ -48,9 +49,11 @@ def test_discover_twice_writes_diagrams_and_reports_changes(tmp_path, capsys):
     assert "core-sw (switch" in out
     runs = tmp_path / "runs"
     for name in ("latest.json", "topology-latest.json", "network-latest.html",
-                 "network-latest.drawio"):
+                 "network-latest.drawio", "network-latest.vsdx"):
         assert (runs / name).exists(), name
-    assert "core-sw" in (runs / "network-latest.html").read_text(encoding="utf-8")
+    page = (runs / "network-latest.html").read_text(encoding="utf-8")
+    assert "core-sw" in page
+    assert 'class="frame-name"' in page and "Server room" in page
 
     # Rebuilding from the saved run touches no network and needs no SNMP.
     with mock.patch("netmapper.discovery.local.read_arp_cache") as arp:

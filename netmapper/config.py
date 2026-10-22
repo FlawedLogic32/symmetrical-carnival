@@ -44,6 +44,15 @@ class SnmpCredential:
 
 
 @dataclass
+class GroupRule:
+    """A site, floor or room on the diagram, and what belongs in it."""
+
+    name: str
+    # Subnets and single addresses, or lower-case name/MAC patterns such as "floor2-*".
+    members: list[ipaddress.IPv4Network | str] = field(default_factory=list)
+
+
+@dataclass
 class Config:
     subnets: list[ipaddress.IPv4Network] = field(default_factory=list)
     ping_sweep: bool = False
@@ -64,6 +73,8 @@ class Config:
     output_directory: Path = Path("runs")
     resolve_names: bool = False
     oui_file: Path = Path("oui.csv")
+    diagram_groups: list[GroupRule] = field(default_factory=list)
+    group_by_location: bool = False
 
 
 def _secret(value: str | None) -> str | None:
@@ -127,6 +138,20 @@ def _credential(raw: dict) -> SnmpCredential:
     return cred
 
 
+def _group(raw: dict) -> GroupRule:
+    name = str(raw.get("name", "")).strip()
+    if not name:
+        raise ConfigError("each [[diagram.groups]] entry needs a name")
+    members: list[ipaddress.IPv4Network | str] = []
+    for member in raw.get("members", []):
+        member = str(member).strip()
+        try:
+            members.append(ipaddress.IPv4Network(member, strict=False))
+        except ValueError:
+            members.append(member.lower())
+    return GroupRule(name, members)
+
+
 def load_config(path: str | Path) -> Config:
     path = Path(path)
     try:
@@ -144,6 +169,7 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
     out = raw.get("output", {})
     topo = raw.get("topology", {})
     dhcp = raw.get("dhcp", {})
+    diagram = raw.get("diagram", {})
 
     try:
         subnets = [ipaddress.IPv4Network(s, strict=False) for s in disc.get("subnets", [])]
@@ -179,4 +205,6 @@ def config_from_dict(raw: dict, base_dir: Path = Path(".")) -> Config:
         output_directory=output_dir,
         resolve_names=bool(topo.get("resolve_names", False)),
         oui_file=oui_file,
+        diagram_groups=[_group(g) for g in diagram.get("groups", [])],
+        group_by_location=bool(diagram.get("group_by_snmp_location", False)),
     )

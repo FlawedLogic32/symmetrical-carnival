@@ -12,6 +12,10 @@ How links are worked out, most reliable first:
    have something in between that can't be queried, so an "unmanaged switch" node
    is inferred there. Hosts seen on a port facing a phone, an access point or a
    switch we couldn't query are attached to that device instead.
+5. VM hosts: a server running virtual machines also puts several MACs on one port.
+   If (nearly) all of them come from a hypervisor's MAC range, the port goes to a
+   "VM host" instead: the one physical MAC if there is one, otherwise an inferred
+   node, with the VMs hanging off it.
 
 Anything seen only in an ARP cache, with no switch port, is attached to a
 "location unknown" node so it still appears on the diagram.
@@ -29,7 +33,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .models import DiscoveryRun, Neighbor, SnmpDevice
-from .oui import VendorLookup
+from .oui import VendorLookup, virtual_nic_platform
 from .util import normalize_mac
 
 log = logging.getLogger(__name__)
@@ -38,6 +42,7 @@ log = logging.getLogger(__name__)
 ROUTER = "router"
 SWITCH = "switch"
 UNMANAGED_SWITCH = "unmanaged-switch"
+VM_HOST = "vm-host"
 ACCESS_POINT = "access-point"
 PHONE = "phone"
 NETWORK_DEVICE = "network-device"
@@ -309,6 +314,8 @@ class _Builder:
                     self.add_link(neighbor, None, h, None, "mac-table", inferred=True)
             elif len(hosts) == 1:
                 self.add_link(dev_id, port, hosts[0], None, "mac-table")
+            elif self._place_vm_host(dev_id, port, hosts):
+                pass
             else:
                 ums = f"ums:{dev_id[4:]}:{port}"
                 self.nodes[ums] = Node(id=ums, kind=UNMANAGED_SWITCH, inferred=True,
@@ -331,6 +338,30 @@ class _Builder:
                 self.notes.append("no managed switches were queried, so connections "
                                   "between devices are unknown")
 
+    def _place_vm_host(self, dev_id: str, port: str, hosts: list[str]) -> bool:
+        """Attach a port's hosts to a VM host if they look like VMs. False if they don't.
+
+        A hypervisor's own NIC is often silent or uses a virtual MAC too (ESXi's vmk0,
+        a Hyper-V host's vNIC), so all-virtual is the common case. With two or more
+        physical MACs there really is something switching in between.
+        """
+        physical = [h for h in hosts if not virtual_nic_platform(self.nodes[h].mac)]
+        if len(physical) > 1 or len(physical) == len(hosts):
+            return False
+        if physical:
+            vm_host = physical[0]
+            self.nodes[vm_host].kind = VM_HOST
+            self.add_link(dev_id, port, vm_host, None, "mac-table")
+        else:
+            vm_host = f"vmhost:{dev_id[4:]}:{port}"
+            self.nodes[vm_host] = Node(id=vm_host, kind=VM_HOST, inferred=True,
+                                       label=f"VM host ({self.nodes[dev_id].label} {port})")
+            self.add_link(dev_id, port, vm_host, None, "inferred", inferred=True)
+        for h in hosts:
+            if h != vm_host:
+                self.add_link(vm_host, None, h, None, "inferred", inferred=True)
+        return True
+
     def _add_host(self, mac: str | None, ip: str | None) -> str:
         node_id = f"host:{mac or ip}"
         if node_id not in self.nodes:
@@ -344,7 +375,7 @@ class _Builder:
             dns = self.names.get(node.ip or "")
             if not node.label:
                 node.label = dns or node.ip or node.mac or node.id
-            elif dns and node.kind == HOST:
+            elif dns and node.kind in (HOST, VM_HOST):
                 node.label = dns
 
 
@@ -378,7 +409,7 @@ def build_topology(run: DiscoveryRun, vendors: VendorLookup | None = None,
     b.place_endpoints()
     b.finish()
     order = {ROUTER: 0, SWITCH: 1, NETWORK_DEVICE: 2, UNMANAGED_SWITCH: 3, ACCESS_POINT: 4,
-             PHONE: 5, HOST: 6, UNKNOWN_SEGMENT: 7}
+             PHONE: 5, VM_HOST: 6, HOST: 7, UNKNOWN_SEGMENT: 8}
     nodes = sorted(b.nodes.values(), key=lambda n: (order.get(n.kind, 9), n.label.lower()))
     return Topology(generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     source_run=source, nodes=nodes, links=list(b.links.values()),

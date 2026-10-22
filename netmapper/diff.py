@@ -56,7 +56,7 @@ def diff_topologies(old: Topology | None, new: Topology) -> TopologyDiff:
     was, now = _attachments(old), _attachments(new)
     for node_id in sorted(before.keys() & after.keys()):
         node = after[node_id]
-        if node.kind != "host":
+        if node.kind not in ("host", "vm-host"):
             continue
         a, b = was.get(node_id, set()), now.get(node_id, set())
         if a and b and a != b:
