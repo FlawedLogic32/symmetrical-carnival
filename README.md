@@ -32,7 +32,7 @@ From a terminal you get more control:
 .\netmapper.exe discover --show      # also print the topology as an outline
 .\netmapper.exe topology --open      # redraw from the last run without touching the network
 .\netmapper.exe update-oui           # one-off: download the MAC vendor list from the IEEE
-.\netmapper.exe schedule             # map every day at 08:00 and alert on new devices
+.\netmapper.exe schedule             # map every day at 08:00 (alerts are opt-in)
 ```
 
 Windows SmartScreen may warn the first time because the .exe isn't code-signed. Choose
@@ -124,10 +124,10 @@ hides itself. `--background` runs it whether or not anyone is logged on, with no
 all, but then Windows notifications can't be shown, and creating it may need an
 administrator terminal.
 
-When a run finds a new device, netmapper can tell you (set this up in `[alerts]`, see
-[`config.example.toml`](config.example.toml)):
+When a run finds a new device, netmapper can tell you. Alerts are all off by default;
+turn on the ones you want in `[alerts]` (see [`config.example.toml`](config.example.toml)):
 
-- **Windows notification** on this PC (on by default).
+- **Windows notification** on this PC (`desktop = true`).
 - **Email** through your mail server.
 - **Webhook** to Teams, Slack, Discord, or anything that accepts JSON.
 

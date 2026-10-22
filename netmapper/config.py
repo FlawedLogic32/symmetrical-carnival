@@ -50,7 +50,7 @@ class WebhookAlert:
 @dataclass
 class AlertsConfig:
     on: set[str] = field(default_factory=lambda: {"new"})  # any of "new", "gone", "moved"
-    desktop: bool = True
+    desktop: bool = False
     email: EmailAlert | None = None
     webhook: WebhookAlert | None = None
 
@@ -116,7 +116,7 @@ def _alerts(raw: dict) -> AlertsConfig:
     if on - ALERT_EVENTS:
         raise ConfigError(f"alerts.on: unknown events {sorted(on - ALERT_EVENTS)}; "
                           f"use {sorted(ALERT_EVENTS)}")
-    alerts = AlertsConfig(on=on, desktop=bool(raw.get("desktop", True)))
+    alerts = AlertsConfig(on=on, desktop=bool(raw.get("desktop", False)))
 
     email = raw.get("email", {})
     if email.get("enabled", True) and email.get("smtp_host"):

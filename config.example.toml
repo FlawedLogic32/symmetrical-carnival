@@ -57,12 +57,13 @@ oui_file = "oui.csv"
 directory = "runs"
 
 [alerts]
-# After each run, tell someone if devices appeared ("new"), disappeared ("gone") or
-# moved to a different switch port ("moved"). The first run never alerts.
+# Every alert is off until you turn it on here. Then, after each run, netmapper tells
+# you if devices appeared ("new"), disappeared ("gone") or moved to a different switch
+# port ("moved"). The first run never alerts.
 on = ["new"]
 # A Windows notification on this PC. Needs someone logged on, so it doesn't work
 # with "netmapper schedule --background".
-desktop = true
+desktop = false
 
 # Email through your mail server. Off unless smtp_host is set.
 # [alerts.email]

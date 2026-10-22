@@ -60,6 +60,7 @@ def test_alert_config(monkeypatch):
     assert cfg.alerts.webhook.url == "https://example.invalid/x"
     assert config_from_dict({}).alerts.on == {"new"}
     assert config_from_dict({}).alerts.email is None
+    assert alerts.channels(config_from_dict({}).alerts) == []  # all alerts are opt-in
 
 
 def test_bad_alert_config():
