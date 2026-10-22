@@ -27,7 +27,7 @@ from . import __version__
 from . import alerts as alerting
 from . import schedule as scheduling
 from .config import Config, ConfigError, load_config
-from .diagram import to_drawio, to_html
+from .diagram import assign_groups, compute_layout, to_drawio, to_html, to_vsdx
 from .diff import diff_topologies
 from .discovery import _stamp, load_run, run_discovery, save_run, save_topology
 from .init import write_starter_config
@@ -44,16 +44,18 @@ def _previous_topology(cfg: Config) -> Topology | None:
         return None
 
 
-def _write_text(directory: Path, name: str, latest: str, text: str) -> Path:
+def _write(directory: Path, name: str, latest: str, data: str | bytes) -> Path:
+    if isinstance(data, str):
+        data = data.encode("utf-8")
     directory.mkdir(parents=True, exist_ok=True)
     for target in (directory / name, directory / latest):
-        target.write_text(text, encoding="utf-8")
+        target.write_bytes(data)
     return directory / name
 
 
 def build_outputs(cfg: Config, run: DiscoveryRun, source: Path, show: bool = False,
                   open_html: bool = False, alert: bool = False) -> Path:
-    """Topology, diff against the previous one, then the draw.io and HTML diagrams.
+    """Topology, diff against the previous one, then the draw.io, Visio and HTML diagrams.
     With ``alert``, also sends the configured alerts if anything changed."""
     previous = _previous_topology(cfg)
     vendors = VendorLookup.load_if_present(cfg.oui_file)
@@ -62,11 +64,18 @@ def build_outputs(cfg: Config, run: DiscoveryRun, source: Path, show: bool = Fal
     diff = diff_topologies(previous, topo)
     save_topology(topo, cfg.output_directory, run.started_at)
 
+    locations = ({f"dev:{d.ip}": d.sys_location for d in run.devices if d.sys_location}
+                 if cfg.group_by_location else {})
+    layout = compute_layout(topo, assign_groups(topo, cfg.diagram_groups, locations))
+    new_ids = {n.id for n in diff.added}
+
     stamp = _stamp(run.started_at)
-    drawio = _write_text(cfg.output_directory, f"network-{stamp}.drawio", "network-latest.drawio",
-                         to_drawio(topo, new_ids={n.id for n in diff.added}))
-    html = _write_text(cfg.output_directory, f"network-{stamp}.html", "network-latest.html",
-                       to_html(topo, diff, first_run=previous is None))
+    drawio = _write(cfg.output_directory, f"network-{stamp}.drawio", "network-latest.drawio",
+                    to_drawio(topo, layout, new_ids))
+    visio = _write(cfg.output_directory, f"network-{stamp}.vsdx", "network-latest.vsdx",
+                   to_vsdx(topo, layout, new_ids))
+    html = _write(cfg.output_directory, f"network-{stamp}.html", "network-latest.html",
+                  to_html(topo, diff, first_run=previous is None, layout=layout))
 
     kinds: dict[str, int] = {}
     for n in topo.nodes:
@@ -85,6 +94,7 @@ def build_outputs(cfg: Config, run: DiscoveryRun, source: Path, show: bool = Fal
             print(f"  {line}")
     print(f"Diagram: {html.resolve()}")
     print(f"Editable diagram (draw.io): {drawio.resolve()}")
+    print(f"Editable diagram (Visio): {visio.resolve()}")
     if show and topo.nodes:
         print()
         print(render_tree(topo))

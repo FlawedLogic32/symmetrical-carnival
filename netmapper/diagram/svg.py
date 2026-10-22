@@ -6,7 +6,9 @@ from html import escape
 
 from ..topology import Topology
 from .layout import Layout, compute_layout
-from .style import KIND_NAMES, NEW_STROKE, box_lines, colors
+from . import icons
+from .style import (FRAME_FILL, FRAME_STROKE, FRAME_TEXT, ICON_LEFT, KIND_NAMES, NEW_STROKE,
+                    box_lines, colors, icon_color, icon_size, text_area)
 
 
 def _attr(value) -> str:
@@ -18,8 +20,18 @@ def to_svg(topo: Topology, layout: Layout | None = None, new_ids: set[str] | Non
     new_ids = new_ids or set()
     w, h = max(layout.width, 200), max(layout.height, 120)
     out = [f'<svg xmlns="http://www.w3.org/2000/svg" class="netmap" viewBox="0 0 {w:.0f} {h:.0f}" '
-           f'width="{w:.0f}" height="{h:.0f}" font-family="Segoe UI, system-ui, sans-serif">',
-           '<g class="links">']
+           f'width="{w:.0f}" height="{h:.0f}" font-family="Segoe UI, system-ui, sans-serif">']
+
+    if layout.frames:
+        out.append('<g class="frames">')
+        for f in layout.frames:
+            out.append(f'<g class="frame"><rect x="{f.x:.1f}" y="{f.y:.1f}" width="{f.w:.0f}" '
+                       f'height="{f.h:.0f}" rx="12" fill="{FRAME_FILL}" stroke="{FRAME_STROKE}" '
+                       f'stroke-width="1.5" stroke-dasharray="8 5"/>'
+                       f'<text class="frame-name" x="{f.x + 16:.1f}" y="{f.y + 22:.1f}" '
+                       f'fill="{FRAME_TEXT}">{_attr(f.name)}</text></g>')
+        out.append("</g>")
+    out.append('<g class="links">')
 
     for edge in layout.edges:
         pts = " ".join(f"{x:.1f},{y:.1f}" for x, y in edge.points)
@@ -55,12 +67,16 @@ def to_svg(topo: Topology, layout: Layout | None = None, new_ids: set[str] | Non
                    f'stroke-width="{3 if is_new else 1.5}"{dash}/>')
         out.append(f'<rect x="{box.x:.1f}" y="{box.y:.1f}" width="6" height="{box.h:.0f}" rx="3" '
                    f'fill="{stroke}"/>')
+        size = icon_size(box.leaf)
+        out.append(icons.svg_elements(node.kind, box.x + ICON_LEFT, box.y + (box.h - size) / 2,
+                                      size, icon_color(node)))
         lines = box_lines(node, box.leaf, box.parent_port if box.leaf else None)
         first_y = box.y + box.h / 2 - (len(lines) - 1) * 7.5 + 4
+        text_x, _ = text_area(box.x, box.w, box.leaf)
         for i, line in enumerate(lines):
             cls = "name" if i == 0 else "detail"
-            out.append(f'<text class="{cls}" x="{box.cx + 3:.1f}" y="{first_y + i * 15:.1f}" '
-                       f'text-anchor="middle">{_attr(line)}</text>')
+            out.append(f'<text class="{cls}" x="{text_x:.1f}" y="{first_y + i * 15:.1f}">'
+                       f'{_attr(line)}</text>')
         if is_new:
             out.append(f'<text class="badge" x="{box.x + box.w - 8:.1f}" y="{box.y + 13:.1f}" '
                        f'text-anchor="end">NEW</text>')
@@ -74,6 +90,7 @@ def to_svg(topo: Topology, layout: Layout | None = None, new_ids: set[str] | Non
                ".netmap .name{font-size:12.5px;font-weight:600;fill:#0f172a}"
                ".netmap .detail{font-size:10.5px;fill:#475569}"
                ".netmap .badge{font-size:9px;font-weight:700;fill:#059669}"
+               ".netmap .frame-name{font-size:14px;font-weight:600}"
                "</style>")
     out.append("</svg>")
     return "\n".join(out)

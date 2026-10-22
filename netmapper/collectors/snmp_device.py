@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 SYS_DESCR = "1.3.6.1.2.1.1.1.0"
 SYS_OBJECT_ID = "1.3.6.1.2.1.1.2.0"
 SYS_NAME = "1.3.6.1.2.1.1.5.0"
+SYS_LOCATION = "1.3.6.1.2.1.1.6.0"
 
 IF_DESCR = "1.3.6.1.2.1.2.2.1.2"
 IF_PHYS_ADDRESS = "1.3.6.1.2.1.2.2.1.6"
@@ -197,6 +198,7 @@ def collect_device(snmp: Snmp, ip: str) -> SnmpDevice:
     device = SnmpDevice(ip=ip)
     device.sys_name = octets_to_text(snmp.get(SYS_NAME))
     device.sys_descr = octets_to_text(snmp.get(SYS_DESCR))
+    device.sys_location = octets_to_text(snmp.get(SYS_LOCATION))
     oid = snmp.get(SYS_OBJECT_ID)
     device.sys_object_id = str(oid) if oid is not None else None
     try:

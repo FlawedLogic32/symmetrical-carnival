@@ -72,7 +72,7 @@ def main(exe: Path) -> None:
     print((work / "config.toml").read_text(encoding="utf-8"))
     run(exe, "discover", "--show", cwd=work)
     for name in ("latest.json", "topology-latest.json", "network-latest.html",
-                 "network-latest.drawio"):
+                 "network-latest.drawio", "network-latest.vsdx"):
         expect(work / "runs" / name)
 
     # A scheduled-style run logs to a file instead of the console.
