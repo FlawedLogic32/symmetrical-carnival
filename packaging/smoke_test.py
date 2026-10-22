@@ -7,6 +7,7 @@ snmpsim is installed) a full run against a simulated switch over real SNMP.
 """
 
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -17,6 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tests"))
+sys.path.insert(0, str(ROOT))
 
 
 def run(exe, *args, cwd, check=True):
@@ -40,9 +42,29 @@ def expect(path: Path, text: str | None = None):
     print(f"ok: {path.name}" + (f" mentions {text!r}" if text else ""))
 
 
+def show_arp_parsing() -> None:
+    """Print this machine's real ARP cache next to what netmapper makes of it."""
+    from netmapper.collectors import local
+
+    cmd = ["arp", "-a"] if local.IS_WINDOWS else ["ip", "-4", "neigh", "show"]
+    try:
+        raw = subprocess.run(cmd, capture_output=True, text=True, timeout=30).stdout
+    except OSError as exc:
+        print(f"could not run {cmd[0]}: {exc}")
+        return
+    print(f"$ {' '.join(cmd)}\n{raw}")
+    hosts = local.read_arp_cache()
+    print(f"parsed {len(hosts)} hosts: {[(h.ip, h.mac) for h in hosts]}")
+    lines = [ln for ln in raw.splitlines() if re.search(r"\d+\.\d+\.\d+\.\d+\s+\S+-\S+", ln)]
+    unicast = [ln for ln in lines if not re.search(r"\s(ff-ff|01-00-5e)", ln, re.I)]
+    if unicast and not hosts:
+        raise SystemExit("arp -a lists unicast entries but none were parsed")
+
+
 def main(exe: Path) -> None:
     exe = exe.resolve()
     run(exe, "--version", cwd=ROOT)
+    show_arp_parsing()
 
     work = Path(tempfile.mkdtemp(prefix="netmapper-smoke-"))
     run(exe, "init", cwd=work)
@@ -61,12 +83,12 @@ def main(exe: Path) -> None:
     if not responder:
         print("snmpsim not installed; skipping the SNMP run")
         return
+    from fake_snmp import snmprec
     from test_snmp_device import core_switch
-    from test_snmp_live import _snmprec
 
     sim = Path(tempfile.mkdtemp(prefix="netmapper-sim-"))
     (sim / "data").mkdir()
-    (sim / "data" / "public.snmprec").write_text(_snmprec(core_switch()))
+    (sim / "data" / "public.snmprec").write_text(snmprec(core_switch()))
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]

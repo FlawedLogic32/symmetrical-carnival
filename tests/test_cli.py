@@ -63,3 +63,39 @@ def test_init_refuses_to_overwrite(tmp_path):
     assert cli.main(["init", "-c", str(path)]) == 0
     assert load_config(path).subnets
     assert cli.main(["init", "-c", str(path)]) == 1
+
+
+def test_subnet_guess():
+    from netmapper.init import guess_subnet
+
+    assert guess_subnet("192.168.7.23", None, "192.168.7.1") == "192.168.7.0/24"
+    assert guess_subnet("10.1.5.132", 16, "10.1.0.1") == "10.1.0.0/16"
+    assert guess_subnet("10.1.5.132", None, "10.1.0.1") == "10.1.0.0/21"  # widened to fit
+    assert guess_subnet("10.20.30.40", 8, None) == "10.20.0.0/16"  # capped
+    assert guess_subnet(None, None, None) == "192.168.1.0/24"
+
+
+def test_local_prefix_reads_windows_ipconfig():
+    from netmapper import init
+
+    ipconfig = """
+Ethernet adapter Ethernet:
+
+   Connection-specific DNS Suffix  . : example.internal
+   IPv4 Address. . . . . . . . . . . : 10.1.5.132
+   Subnet Mask . . . . . . . . . . . : 255.255.0.0
+   Default Gateway . . . . . . . . . : 10.1.0.1
+"""
+    with mock.patch.object(init, "IS_WINDOWS", True), \
+            mock.patch.object(init, "_run", return_value=ipconfig):
+        assert init.local_prefix("10.1.5.132") == 16
+    route = """
+IPv4 Route Table
+===========================================================================
+Active Routes:
+Network Destination        Netmask          Gateway       Interface  Metric
+          0.0.0.0          0.0.0.0         10.1.0.1      10.1.5.132     10
+"""
+    with mock.patch.object(init, "IS_WINDOWS", True), \
+            mock.patch.object(init, "_run", return_value=route):
+        assert init.default_gateway() == "10.1.0.1"

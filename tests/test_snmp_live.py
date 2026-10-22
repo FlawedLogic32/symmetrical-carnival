@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
-from fake_snmp import FakeSnmp
+from fake_snmp import FakeSnmp, snmprec
 from test_snmp_device import core_switch
 
 from netmapper.collectors import snmp_device as sd
@@ -22,19 +22,6 @@ from netmapper.config import SnmpCredential
 
 RESPONDER = shutil.which("snmpsim-command-responder")
 pytestmark = pytest.mark.skipif(RESPONDER is None, reason="snmpsim not installed")
-
-
-def _snmprec(data: dict) -> str:
-    rows = []
-    for oid, value in data.items():
-        if isinstance(value, bytes):
-            rows.append((oid, "4x", value.hex()))
-        elif isinstance(value, int):
-            rows.append((oid, "2", str(value)))
-        else:
-            rows.append((oid, "6", value))
-    rows.sort(key=lambda r: tuple(int(p) for p in r[0].split(".")))
-    return "".join(f"{o}|{t}|{v}\n" for o, t, v in rows)
 
 
 def _free_port() -> int:
@@ -47,7 +34,7 @@ def _free_port() -> int:
 def agent_port():
     work = Path(tempfile.mkdtemp(prefix="netmapper-sim-"))
     (work / "data").mkdir()
-    (work / "data" / "public.snmprec").write_text(_snmprec(core_switch()))
+    (work / "data" / "public.snmprec").write_text(snmprec(core_switch()))
     port = _free_port()
     args = [RESPONDER, f"--data-dir={work / 'data'}", f"--cache-dir={work / 'cache'}",
             f"--agent-udpv4-endpoint=127.0.0.1:{port}"]
