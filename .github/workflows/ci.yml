@@ -34,6 +34,20 @@ jobs:
     name: Build netmapper.exe
     needs: test
     runs-on: windows-latest
+    outputs:
+      signed: ${{ steps.signature.outputs.signed }}
+    # Code signing is optional: it runs only when one of these sets of secrets exists.
+    # See docs/code-signing.md.
+    env:
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      TRUSTED_SIGNING_ENDPOINT: ${{ secrets.TRUSTED_SIGNING_ENDPOINT }}
+      TRUSTED_SIGNING_ACCOUNT: ${{ secrets.TRUSTED_SIGNING_ACCOUNT }}
+      TRUSTED_SIGNING_PROFILE: ${{ secrets.TRUSTED_SIGNING_PROFILE }}
+      WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+      TIMESTAMP_URL: ${{ vars.TIMESTAMP_URL || 'http://timestamp.digicert.com' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,6 +59,50 @@ jobs:
           pip install ".[build]" snmpsim pysmi
       - name: Build
         run: python packaging/build_exe.py
+      - name: Sign with Azure Trusted Signing
+        if: env.TRUSTED_SIGNING_ACCOUNT != '' && github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          Install-Module -Name TrustedSigning -Scope CurrentUser -Force -AllowClobber
+          # Authenticates with the AZURE_TENANT_ID / AZURE_CLIENT_ID / AZURE_CLIENT_SECRET env vars.
+          Invoke-TrustedSigning `
+            -Endpoint $env:TRUSTED_SIGNING_ENDPOINT `
+            -CodeSigningAccountName $env:TRUSTED_SIGNING_ACCOUNT `
+            -CertificateProfileName $env:TRUSTED_SIGNING_PROFILE `
+            -Files "$PWD\dist\netmapper.exe" `
+            -FileDigest SHA256 `
+            -TimestampRfc3161 http://timestamp.acs.microsoft.com `
+            -TimestampDigest SHA256
+      - name: Sign with a .pfx certificate
+        if: env.TRUSTED_SIGNING_ACCOUNT == '' && env.WINDOWS_CERT_PFX != '' && github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
+              Sort-Object FullName -Descending | Select-Object -First 1
+            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD `
+              /fd SHA256 /tr $env:TIMESTAMP_URL /td SHA256 /d netmapper dist\netmapper.exe
+            if ($LASTEXITCODE -ne 0) { throw "signtool failed with exit code $LASTEXITCODE" }
+          } finally {
+            Remove-Item $pfx -Force -ErrorAction SilentlyContinue
+          }
+      - name: Check signature
+        id: signature
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature dist\netmapper.exe
+          if ($sig.SignerCertificate) {
+            Write-Host "Signed by: $($sig.SignerCertificate.Subject) (status: $($sig.Status))"
+            Write-Host "Timestamped: $([bool]$sig.TimeStamperCertificate)"
+          } elseif ($env:TRUSTED_SIGNING_ACCOUNT -or $env:WINDOWS_CERT_PFX) {
+            if ("${{ github.event_name }}" -ne "pull_request") { throw "Signing secrets are set but the .exe is not signed." }
+            Write-Host "Not signed: pull request builds are never signed."
+          } else {
+            Write-Host "Not signed: no signing secrets are configured (see docs/code-signing.md)."
+          }
+          "signed=$([bool]$sig.SignerCertificate)" >> $env:GITHUB_OUTPUT
       - name: Smoke test the .exe on Windows
         run: python packaging/smoke_test.py dist/netmapper.exe
       - name: Package
@@ -72,7 +130,15 @@ jobs:
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ needs.windows-exe.outputs.signed }}
         run: |
           cd netmapper-windows && zip -r ../netmapper-windows.zip . && cd ..
-          gh release create "$GITHUB_REF_NAME" netmapper-windows.zip netmapper-windows/netmapper.exe \
-            --repo "$GITHUB_REPOSITORY" --title "netmapper $GITHUB_REF_NAME" --generate-notes
+          sha256sum netmapper-windows.zip > SHA256SUMS.txt
+          (cd netmapper-windows && sha256sum netmapper.exe) >> SHA256SUMS.txt
+          if [ "$SIGNED" = "True" ]; then
+            note="netmapper.exe is Authenticode signed."
+          else
+            note="netmapper.exe is **not** code-signed, so Windows SmartScreen may warn on first run. Check it against SHA256SUMS.txt."
+          fi
+          gh release create "$GITHUB_REF_NAME" netmapper-windows.zip netmapper-windows/netmapper.exe SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --title "netmapper $GITHUB_REF_NAME" --notes "$note" --generate-notes

@@ -34,8 +34,9 @@ From a terminal you get more control:
 .\netmapper.exe update-oui           # one-off: download the MAC vendor list from the IEEE
 ```
 
-Windows SmartScreen may warn the first time because the .exe isn't code-signed. Choose
-"More info", then "Run anyway", or run it from source as below.
+If a build isn't code-signed, Windows SmartScreen may warn the first time. Choose
+"More info", then "Run anyway", or run it from source as below. Each release's notes say
+whether its .exe is signed, and `SHA256SUMS.txt` lets you check the download.
 
 ## How it finds things
 
@@ -131,4 +132,5 @@ To build the Windows executable: `pip install ".[build]"`, then run
 CI (GitHub Actions) runs the tests on Windows and Linux. It then builds `netmapper.exe`
 on Windows, smoke tests it there (including a run against a simulated SNMP switch), and
 uploads it as the `netmapper-windows` artifact. Pushing a tag such as `v1.0.0` also
-publishes a release with the .exe attached.
+publishes a release with the .exe attached. The .exe is code-signed when signing secrets
+are set up; see [docs/code-signing.md](docs/code-signing.md).
