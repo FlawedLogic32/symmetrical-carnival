@@ -51,7 +51,26 @@ resolve_names = false
 # MAC vendor list. Run "netmapper update-oui" once to download it from the IEEE.
 oui_file = "oui.csv"
 
+[diagram]
+# Draw a labelled frame round each site, floor or room. Off until you set it up.
+#
+# Use the location set on each managed switch and router (its SNMP sysLocation, e.g.
+# "Floor 2 comms room"). Devices plugged into a switch are drawn in its frame.
+group_by_snmp_location = false
+
+# Or say what belongs where. Members can be subnets, IP addresses, or device names and
+# MAC addresses with * wildcards. The first matching group wins, and these take priority
+# over SNMP locations. Anything not listed joins the group of the switch it plugs into,
+# so naming each floor's switches is usually enough.
+# [[diagram.groups]]
+# name = "Ground floor"
+# members = ["gf-sw*"]
+#
+# [[diagram.groups]]
+# name = "First floor"
+# members = ["ff-sw*", "192.168.20.0/24"]
+
 [output]
-# Each run saves discovery-, topology- and network-<time> files (JSON, .html, .drawio),
+# Each run saves discovery-, topology- and network-<time> files (JSON, .html, .drawio, .vsdx),
 # plus *-latest copies of the newest. Relative paths are relative to this file.
 directory = "runs"

@@ -17,6 +17,7 @@ def core_switch(neighbor_ip="192.168.1.3"):
     mac = lambda *b: ".".join(str(x) for x in b)  # noqa: E731
     d = {
         sd.SYS_NAME: b"core-sw",
+        sd.SYS_LOCATION: b"Ground floor comms room",
         sd.SYS_DESCR: b"Example switch",
         sd.SYS_OBJECT_ID: "1.3.6.1.4.1.9.1.1",
         sd.LLDP_LOC_CHASSIS_ID: bytes.fromhex("00aa00aa00aa"),
@@ -58,6 +59,7 @@ def core_switch(neighbor_ip="192.168.1.3"):
 def test_collect_device_reads_every_table():
     dev = sd.collect_device(FakeSnmp(core_switch()), "192.168.1.2")
     assert dev.sys_name == "core-sw"
+    assert dev.sys_location == "Ground floor comms room"
     assert dev.chassis_id == "00:aa:00:aa:00:aa"
     assert [i.name for i in dev.interfaces] == ["Gi1/0/1", "Gi1/0/2", "Gi1/0/3"]
 
