@@ -140,8 +140,11 @@ def _double_click() -> int:
         print(write_starter_config(config))
         print()
         if _interactive():
-            answer = input("Do you have SNMP login details for your managed switches? "
-                           "Set them up now? [y/N]: ").strip().lower()
+            try:
+                answer = input("Do you have SNMP login details for your managed switches? "
+                               "Set them up now? [y/N]: ").strip().lower()
+            except EOFError:  # Windows reports NUL as a tty, so stdin may still be empty
+                answer = ""
             if answer.startswith("y"):
                 _snmp_setup(config)
             else:
